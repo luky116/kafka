@@ -217,6 +217,7 @@ import org.apache.kafka.common.requests.IncrementalAlterConfigsRequest;
 import org.apache.kafka.common.requests.IncrementalAlterConfigsResponse;
 import org.apache.kafka.common.requests.LeaveGroupRequest;
 import org.apache.kafka.common.requests.LeaveGroupResponse;
+import org.apache.kafka.common.requests.ListConnectsRequest;
 import org.apache.kafka.common.requests.ListGroupsRequest;
 import org.apache.kafka.common.requests.ListGroupsResponse;
 import org.apache.kafka.common.requests.ListOffsetsRequest;
@@ -4546,6 +4547,36 @@ public class KafkaAdminClient extends AdminClient {
         };
         runnable.call(call, now);
         return new UnregisterBrokerResult(future);
+    }
+
+    public ListConnectResult listConnects(){
+        final KafkaFutureImpl<Map<String, TopicListing>> future = new KafkaFutureImpl<>();
+        final long now = time.milliseconds();
+        final Call call = new Call("unregisterBroker", calcDeadlineMs(now, 30000),
+                new LeastLoadedNodeProvider()) {
+
+            @Override
+            ListConnectsRequest.Builder createRequest(int timeoutMs) {
+
+                return new ListConnectsRequest.Builder(null);
+            }
+
+            @Override
+            void handleResponse(AbstractResponse abstractResponse) {
+                final UnregisterBrokerResponse response =
+                        (UnregisterBrokerResponse) abstractResponse;
+                Errors error = Errors.forCode(response.data().errorCode());
+
+
+            }
+
+            @Override
+            void handleFailure(Throwable throwable) {
+                future.completeExceptionally(throwable);
+            }
+        };
+        runnable.call(call, now);
+        return null;
     }
 
     /**

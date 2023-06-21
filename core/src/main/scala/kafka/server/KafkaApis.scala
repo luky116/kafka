@@ -222,6 +222,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.DESCRIBE_CLUSTER => handleDescribeCluster(request)
         case ApiKeys.DESCRIBE_PRODUCERS => handleDescribeProducersRequest(request)
         case ApiKeys.UNREGISTER_BROKER => maybeForwardToController(request, handleUnregisterBrokerRequest)
+        case ApiKeys.LIST_CONNECT => maybeForwardToController(request , handleListConnectRequest)
         case _ => throw new IllegalStateException(s"No handler for request api key ${request.header.apiKey}")
       }
     } catch {
@@ -3319,6 +3320,10 @@ class KafkaApis(val requestChannel: RequestChannel,
       // about the new broker epoch and sends a control request with this epoch before the broker learns about it
       brokerEpochInRequest < zkSupport.controller.brokerEpoch
     }
+  }
+
+  def handleListConnectRequest()(request: RequestChannel.Request): Unit = {
+
   }
 }
 
