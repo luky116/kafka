@@ -32,6 +32,7 @@ import org.apache.kafka.common.metrics.stats.WindowedCount;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.qcommon.QCommonManager;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -315,6 +316,7 @@ public class Selector implements Selectable, AutoCloseable {
         ChannelMetadataRegistry metadataRegistry = this.channel(id).channelMetadataRegistry();
         if (metadataRegistry.clientInformation() == null)
             metadataRegistry.registerClientInformation(ClientInformation.EMPTY);
+        QCommonManager.getInstance().getConnectMonitor().connectEstablish(id , socketChannel);
     }
 
     private void ensureNotRegistered(String id) {
@@ -885,6 +887,7 @@ public class Selector implements Selectable, AutoCloseable {
             if (closingChannel != null)
                 doClose(closingChannel, false);
         }
+        QCommonManager.getInstance().getConnectMonitor().connectClose(channel.id(),channel.selectionKey().channel());
     }
 
     private void maybeDelayCloseOnAuthenticationFailure(KafkaChannel channel) {
@@ -941,6 +944,7 @@ public class Selector implements Selectable, AutoCloseable {
 
         if (idleExpiryManager != null)
             idleExpiryManager.remove(channel.id());
+        QCommonManager.getInstance().getConnectMonitor().connectClose(channel.id(),channel.selectionKey().channel());
     }
 
     private void doClose(KafkaChannel channel, boolean notifyDisconnect) {

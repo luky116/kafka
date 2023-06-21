@@ -23,7 +23,6 @@ import java.util
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.{Collections, Optional}
-
 import kafka.admin.AdminUtils
 import kafka.api.{ApiVersion, ElectLeadersRequestOps, KAFKA_0_11_0_IV0, KAFKA_2_3_IV0}
 import kafka.common.OffsetAndMetadata
@@ -88,6 +87,7 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 import kafka.coordinator.group.GroupOverview
 import kafka.server.metadata.ConfigRepository
+import org.apache.kafka.qcommon.QCommonManager
 
 /**
  * Logic to handle the various Kafka requests
@@ -3323,7 +3323,8 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   def handleListConnectRequest()(request: RequestChannel.Request): Unit = {
-
+    QCommonManager.getInstance().getConnectMonitor.getCurrentConnect();
+    QCommonManager.getInstance().getConnectMonitor.getCloseConnect();
   }
 }
 
