@@ -17,12 +17,14 @@
   "apiKey": 101,
   "type": "request",
   "listeners": [ "broker"],
-  "name": "ListConnectsRequest",
+  "name": "ListConnectionsRequest",
 
   "validVersions": "0-4",
   "flexibleVersions": "3+",
   "fields": [
     { "name": "clientAddress", "type": "string", "versions": "0+",
+      "about": "The broker ID to unregister." },
+    { "name": "connectionType", "type": "string", "versions": "0+",
       "about": "The broker ID to unregister." }
   ]
 }

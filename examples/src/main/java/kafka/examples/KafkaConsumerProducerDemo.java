@@ -30,7 +30,7 @@ public class KafkaConsumerProducerDemo {
         producerThread.start();
 
         Consumer consumerThread = new Consumer(KafkaProperties.TOPIC, "DemoConsumer", Optional.empty(), false, 10000, latch);
-        consumerThread.start();
+       // consumerThread.start();
 
         if (!latch.await(5, TimeUnit.MINUTES)) {
             throw new TimeoutException("Timeout after 5 minutes waiting for demo producer and consumer to finish");

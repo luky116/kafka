@@ -1,19 +1,23 @@
 package org.apache.kafka.common.requests;
 
 import java.util.Map;
+import org.apache.kafka.common.message.ListConnectionsResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.Errors;
 
-public class ListConnectsResponse extends AbstractResponse {
+public class ListConnectionsResponse extends AbstractResponse {
 
-    protected ListConnectsResponse(ApiKeys apiKey) {
-        super(apiKey);
+    private ListConnectionsResponseData data;
+
+    public ListConnectionsResponse(ListConnectionsResponseData data) {
+        super(ApiKeys.LIST_CONNECTIONS);
+        this.data = data;
     }
 
     @Override
-    public ApiMessage data() {
-        return null;
+    public ListConnectionsResponseData data() {
+        return data;
     }
 
     @Override

@@ -39,6 +39,7 @@ import org.apache.kafka.common.acl.AclBindingFilter;
 import org.apache.kafka.common.annotation.InterfaceStability;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.FeatureUpdateFailedException;
+import org.apache.kafka.common.qcommon.ListConnections;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.requests.LeaveGroupResponse;
@@ -1496,5 +1497,10 @@ public interface Admin extends AutoCloseable {
      */
     Map<MetricName, ? extends Metric> metrics();
 
-    ListConnectResult listConnects();
+    default  ListConnectionsResult listConnections(ListConnections listConnections){
+        return this.listConnections(listConnections , new ListConnectionsOptions());
+    }
+
+
+    ListConnectionsResult listConnections(ListConnections listConnections , ListConnectionsOptions listConnectionsOptions);
 }

@@ -3,6 +3,10 @@ package org.apache.kafka.qcommon;
 public class BrokerMetaData {
 
 
+    private boolean isStart = false;
+
+    private boolean isAcl = false;
+
     private String clusterName;
 
     private String brokerName;
@@ -11,6 +15,21 @@ public class BrokerMetaData {
 
     private Integer brokerPort;
 
+    public boolean isStart() {
+        return isStart;
+    }
+
+    public boolean isAcl() {
+        return isAcl;
+    }
+
+    public void setStart(boolean start) {
+        isStart = start;
+    }
+
+    public void setAcl(boolean acl) {
+        isAcl = acl;
+    }
 
     public String getClusterName() {
         return clusterName;

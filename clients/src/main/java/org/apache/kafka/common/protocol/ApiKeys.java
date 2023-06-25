@@ -107,7 +107,7 @@ public enum ApiKeys {
     BROKER_HEARTBEAT(ApiMessageType.BROKER_HEARTBEAT, true, RecordBatch.MAGIC_VALUE_V0, false),
     UNREGISTER_BROKER(ApiMessageType.UNREGISTER_BROKER, false, RecordBatch.MAGIC_VALUE_V0, true),
 
-    LIST_CONNECT(ApiMessageType.LIST_CONNECTS , false , RecordBatch.MAGIC_VALUE_V2 , false);
+    LIST_CONNECTIONS(ApiMessageType.LIST_CONNECTIONS , false , RecordBatch.MAGIC_VALUE_V2 , false);
 
     private static final Map<ApiMessageType.ListenerType, EnumSet<ApiKeys>> APIS_BY_LISTENER =
         new EnumMap<>(ApiMessageType.ListenerType.class);

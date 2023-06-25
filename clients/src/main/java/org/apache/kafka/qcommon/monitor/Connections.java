@@ -1,6 +1,6 @@
 package org.apache.kafka.qcommon.monitor;
 
-public class Connect {
+public class Connections {
 
     private Long connectId;
 
