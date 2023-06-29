@@ -31,6 +31,9 @@ public class ConnectionsMonitor {
     }
 
     public void connectEstablish(String id, SocketChannel channel){
+        if(Objects.isNull(brokerMetaData)){
+            return;
+        }
         if(!this.brokerMetaData.isStart()){
             return;
         }
@@ -57,6 +60,9 @@ public class ConnectionsMonitor {
     }
 
     public void connectClose(String id, Channel channel){
+        if(Objects.isNull(brokerMetaData)){
+            return;
+        }
         if(!this.brokerMetaData.isStart()){
             return;
         }
@@ -109,6 +115,4 @@ public class ConnectionsMonitor {
         connectList.addAll(this.connectMap.values());
         return connectList;
     }
-
-
 }

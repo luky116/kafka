@@ -16,7 +16,7 @@
 {
   "apiKey": 101,
   "type": "request",
-  "listeners": [ "broker"],
+  "listeners": [ "broker","zkBroker"],
   "name": "ListConnectionsRequest",
 
   "validVersions": "0-4",

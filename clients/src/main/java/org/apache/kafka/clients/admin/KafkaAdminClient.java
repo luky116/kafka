@@ -1271,7 +1271,9 @@ public class KafkaAdminClient extends AdminClient {
             log.trace("Thread starting");
             try {
                 processRequests();
-            } finally {
+            } catch (Exception e){
+                e.printStackTrace();
+            }finally {
                 AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
 
                 int numTimedOut = 0;

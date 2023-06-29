@@ -22,7 +22,7 @@ import java.nio.ByteBuffer
 import java.util
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.{Collections, Optional}
+import java.util.{Collections, Objects, Optional}
 import kafka.admin.AdminUtils
 import kafka.api.{ApiVersion, ElectLeadersRequestOps, KAFKA_0_11_0_IV0, KAFKA_2_3_IV0}
 import kafka.common.OffsetAndMetadata
@@ -87,6 +87,7 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 import kafka.coordinator.group.GroupOverview
 import kafka.server.metadata.ConfigRepository
+import org.apache.kafka.common.qcommon.ListConnections
 import org.apache.kafka.qcommon.QCommonManager
 import org.apache.kafka.qcommon.monitor.Connections
 
@@ -3328,9 +3329,9 @@ class KafkaApis(val requestChannel: RequestChannel,
     val listConnectionsRequest = request.body[ListConnectionsRequest]
     val listConnectionsRequestData  = listConnectionsRequest.data()
     var connectionsList:java.util.List[Connections] = null
-    if("current".equals(listConnectionsRequestData.connectionType())) {
+    if(Objects.equals(ListConnections.CONNECTION_CURRENT_TYPE,listConnectionsRequestData.connectionType())) {
       connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getCurrentConnections
-    }else if("colse".equals(listConnectionsRequestData.connectionType())) {
+    }else if(Objects.equals(ListConnections.CONNECTION_CLOSE_TYPE,listConnectionsRequestData.connectionType())) {
       connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getCloseConnections
     }
 
