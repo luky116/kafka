@@ -83,16 +83,17 @@ public class ConnectionsMonitor {
 
     public void checkRequestContext(RequestContext requestContext){
         Connections connections = connectMap.get(requestContext.connectionId);
-        if(brokerMetaData.isAcl()){
-            connections.setUserName(requestContext.principal.getName());
-        }else{
-            connections.setUserName(requestContext.header.clientId());
+        if(Objects.isNull(connections.getClientName())) {
+            if (brokerMetaData.isAcl()) {
+                connections.setUserName(requestContext.principal.getName());
+            }
+            connections.setClientName(requestContext.header.clientId());
         }
-        if(Objects.equals(ApiKeys.PRODUCE, requestContext.header.apiKey()) ||Objects.equals(ApiKeys.FETCH, requestContext.header.apiKey()) ){
-            connections.setGroupType(requestContext.header.apiKey().name);
+        if(Objects.isNull(connections.getGroupType())){
+            if(Objects.equals(ApiKeys.PRODUCE, requestContext.header.apiKey()) ||Objects.equals(ApiKeys.FETCH, requestContext.header.apiKey()) ){
+                connections.setGroupType(requestContext.header.apiKey().name);
+            }
         }
-
-
     }
 
     public List<Connections>  getCloseConnections(){

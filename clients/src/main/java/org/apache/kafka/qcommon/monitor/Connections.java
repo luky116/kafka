@@ -30,6 +30,8 @@ public class Connections {
 
     private String userName;
 
+    private String clientName;
+
 
     public Long getConnectId() {
         return connectId;
@@ -142,4 +144,14 @@ public class Connections {
     public void setUserName(String userName) {
         this.userName = userName;
     }
+
+
+    public String getClientName(){
+        return clientName;
+    }
+
+    public void setClientName(String clientName){
+        this.clientName = clientName;
+    }
+
 }
