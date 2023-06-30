@@ -22,6 +22,8 @@ patch-process/*
 rat.out
 TAGS
 *.iml
+./**/*.iml
+tools/tools.iml
 .project
 .settings
 *.ipr

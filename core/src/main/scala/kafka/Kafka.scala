@@ -18,12 +18,12 @@
 package kafka
 
 import java.util.Properties
-
 import joptsimple.OptionParser
 import kafka.server.{KafkaConfig, KafkaRaftServer, KafkaServer, Server}
 import kafka.utils.Implicits._
 import kafka.utils.{CommandLineUtils, Exit, Logging}
 import org.apache.kafka.common.utils.{Java, LoggingSignalHandler, OperatingSystem, Time, Utils}
+import org.apache.kafka.qcommon.QCommonManager
 
 import scala.jdk.CollectionConverters._
 
@@ -87,6 +87,7 @@ object Kafka extends Logging {
       val server = buildServer(serverProps)
 
       try {
+        QCommonManager.getInstance().init(serverProps)
         if (!OperatingSystem.IS_WINDOWS && !Java.isIbmJdk)
           new LoggingSignalHandler().register()
       } catch {
@@ -108,8 +109,9 @@ object Kafka extends Logging {
 
       try server.startup()
       catch {
-        case _: Throwable =>
+        case e: Throwable =>
           // KafkaServer.startup() calls shutdown() in case of exceptions, so we invoke `exit` to set the status code
+          fatal(e.getMessage,e)
           fatal("Exiting Kafka.")
           Exit.exit(1)
       }

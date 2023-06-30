@@ -17,6 +17,9 @@
 
 package org.apache.kafka.clients.admin;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientDnsLookup;
 import org.apache.kafka.clients.ClientRequest;
@@ -125,6 +128,8 @@ import org.apache.kafka.common.message.ExpireDelegationTokenRequestData;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.message.LeaveGroupRequestData.MemberIdentity;
 import org.apache.kafka.common.message.LeaveGroupResponseData.MemberResponse;
+import org.apache.kafka.common.message.ListConnectionsRequestData;
+import org.apache.kafka.common.message.ListConnectionsResponseData;
 import org.apache.kafka.common.message.ListGroupsRequestData;
 import org.apache.kafka.common.message.ListGroupsResponseData;
 import org.apache.kafka.common.message.ListOffsetsRequestData.ListOffsetsPartition;
@@ -156,6 +161,7 @@ import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.network.ChannelBuilder;
 import org.apache.kafka.common.network.Selector;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.qcommon.ListConnections;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.quota.ClientQuotaFilter;
@@ -217,6 +223,8 @@ import org.apache.kafka.common.requests.IncrementalAlterConfigsRequest;
 import org.apache.kafka.common.requests.IncrementalAlterConfigsResponse;
 import org.apache.kafka.common.requests.LeaveGroupRequest;
 import org.apache.kafka.common.requests.LeaveGroupResponse;
+import org.apache.kafka.common.requests.ListConnectionsRequest;
+import org.apache.kafka.common.requests.ListConnectionsResponse;
 import org.apache.kafka.common.requests.ListGroupsRequest;
 import org.apache.kafka.common.requests.ListGroupsResponse;
 import org.apache.kafka.common.requests.ListOffsetsRequest;
@@ -246,6 +254,7 @@ import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.qcommon.monitor.Connections;
 import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
@@ -1262,7 +1271,10 @@ public class KafkaAdminClient extends AdminClient {
             log.trace("Thread starting");
             try {
                 processRequests();
-            } finally {
+            } catch (Exception e){
+                log.error(e.getMessage() , e);
+                throw e;
+            }finally {
                 AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
 
                 int numTimedOut = 0;
@@ -4547,6 +4559,75 @@ public class KafkaAdminClient extends AdminClient {
         runnable.call(call, now);
         return new UnregisterBrokerResult(future);
     }
+
+    @Override
+    public DescribeAclsResult describeAcls(AclBindingFilter filter) {
+        return super.describeAcls(filter);
+    }
+
+    @Override
+    public ListConnectionsResult listConnections(ListConnections listConnections,
+                                                 ListConnectionsOptions listConnectionsOptions){
+        final KafkaFutureImpl<List<Connections>> future = new KafkaFutureImpl<>();
+        final long now = time.milliseconds();
+        final ListConnectionsResult listConnectionsResult = new ListConnectionsResult(future,listConnections.getBrokerList().size());
+
+        for(Node node : this.getNode(listConnections.getBrokerList())) {
+            final Call call = new Call("listConnections", calcDeadlineMs(now, listConnectionsOptions.timeoutMs()), ()->  node) {
+
+                @Override
+                ListConnectionsRequest.Builder createRequest(int timeoutMs) {
+                    ListConnectionsRequestData data = new ListConnectionsRequestData();
+                    data.setConnectionType(listConnections.getConnectionType());
+                    return new ListConnectionsRequest.Builder(data);
+                }
+
+                @Override
+                void handleResponse(AbstractResponse abstractResponse) {
+                    final ListConnectionsResponse response =
+                            (ListConnectionsResponse) abstractResponse;
+                    ListConnectionsResponseData data = response.data();
+                    ObjectMapper objectMapper = new ObjectMapper();
+
+                    try {
+                        List<Connections> connectionsList = objectMapper.readValue(data.data(), new TypeReference<List<Connections>>() {});
+                        listConnectionsResult.setConnectionsList(connectionsList);
+                    } catch (JsonProcessingException e) {
+                        future.completeExceptionally(e);
+                    }
+                }
+
+                @Override
+                void handleFailure(Throwable throwable) {
+                    future.completeExceptionally(throwable);
+                }
+            };
+            runnable.call(call, now);
+        }
+
+        return listConnectionsResult;
+    }
+
+    private List<Node> getNode(List<String> addressList){
+        List<Node> requestNodes = new ArrayList<>();
+        List<Node> nodes = metadataManager.updater().fetchNodes();
+        for(String address : addressList){
+            Node requestNode = null;
+            for(Node node : nodes){
+                String nodeAddress = node.host()+":"+node.port();
+                if(Objects.equals(nodeAddress,address)){
+                    requestNode = node;
+                }
+            }
+            if(Objects.isNull(requestNode)){
+                String message = String.format("listConnection request broker address %s absent",address);
+                throw  new RuntimeException(message);
+            }
+            requestNodes.add(requestNode);
+        }
+        return requestNodes;
+    }
+
 
     /**
      * Get a sub level error when the request is in batch. If given key was not found,

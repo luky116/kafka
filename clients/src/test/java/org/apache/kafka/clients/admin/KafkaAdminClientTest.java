@@ -5232,4 +5232,5 @@ public class KafkaAdminClientTest {
             }
         }
     }
+
 }

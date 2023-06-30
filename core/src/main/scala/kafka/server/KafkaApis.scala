@@ -22,8 +22,7 @@ import java.nio.ByteBuffer
 import java.util
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.{Collections, Optional}
-
+import java.util.{Collections, Objects, Optional}
 import kafka.admin.AdminUtils
 import kafka.api.{ApiVersion, ElectLeadersRequestOps, KAFKA_0_11_0_IV0, KAFKA_2_3_IV0}
 import kafka.common.OffsetAndMetadata
@@ -36,7 +35,7 @@ import kafka.network.RequestChannel
 import kafka.security.authorizer.AuthorizerUtils
 import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.utils.Implicits._
-import kafka.utils.{CoreUtils, Logging}
+import kafka.utils.{CoreUtils, Json, Logging}
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
 import org.apache.kafka.clients.admin.{AlterConfigOp, ConfigEntry}
 import org.apache.kafka.common.acl.AclOperation._
@@ -61,7 +60,7 @@ import org.apache.kafka.common.message.ListOffsetsResponseData.{ListOffsetsParti
 import org.apache.kafka.common.message.MetadataResponseData.{MetadataResponsePartition, MetadataResponseTopic}
 import org.apache.kafka.common.message.OffsetForLeaderEpochRequestData.OffsetForLeaderTopic
 import org.apache.kafka.common.message.OffsetForLeaderEpochResponseData.{EpochEndOffset, OffsetForLeaderTopicResult, OffsetForLeaderTopicResultCollection}
-import org.apache.kafka.common.message.{AddOffsetsToTxnResponseData, AlterClientQuotasResponseData, AlterConfigsResponseData, AlterPartitionReassignmentsResponseData, AlterReplicaLogDirsResponseData, CreateAclsResponseData, CreatePartitionsResponseData, CreateTopicsResponseData, DeleteAclsResponseData, DeleteGroupsResponseData, DeleteRecordsResponseData, DeleteTopicsResponseData, DescribeAclsResponseData, DescribeClientQuotasResponseData, DescribeClusterResponseData, DescribeConfigsResponseData, DescribeGroupsResponseData, DescribeLogDirsResponseData, DescribeProducersResponseData, EndTxnResponseData, ExpireDelegationTokenResponseData, FindCoordinatorResponseData, HeartbeatResponseData, InitProducerIdResponseData, JoinGroupResponseData, LeaveGroupResponseData, ListGroupsResponseData, ListOffsetsResponseData, ListPartitionReassignmentsResponseData, OffsetCommitRequestData, OffsetCommitResponseData, OffsetDeleteResponseData, OffsetForLeaderEpochResponseData, RenewDelegationTokenResponseData, SaslAuthenticateResponseData, SaslHandshakeResponseData, StopReplicaResponseData, SyncGroupResponseData, UpdateMetadataResponseData}
+import org.apache.kafka.common.message.{AddOffsetsToTxnResponseData, AlterClientQuotasResponseData, AlterConfigsResponseData, AlterPartitionReassignmentsResponseData, AlterReplicaLogDirsResponseData, CreateAclsResponseData, CreatePartitionsResponseData, CreateTopicsResponseData, DeleteAclsResponseData, DeleteGroupsResponseData, DeleteRecordsResponseData, DeleteTopicsResponseData, DescribeAclsResponseData, DescribeClientQuotasResponseData, DescribeClusterResponseData, DescribeConfigsResponseData, DescribeGroupsResponseData, DescribeLogDirsResponseData, DescribeProducersResponseData, EndTxnResponseData, ExpireDelegationTokenResponseData, FindCoordinatorResponseData, HeartbeatResponseData, InitProducerIdResponseData, JoinGroupResponseData, LeaveGroupResponseData, ListConnectionsResponseData, ListGroupsResponseData, ListOffsetsResponseData, ListPartitionReassignmentsResponseData, OffsetCommitRequestData, OffsetCommitResponseData, OffsetDeleteResponseData, OffsetForLeaderEpochResponseData, RenewDelegationTokenResponseData, SaslAuthenticateResponseData, SaslHandshakeResponseData, StopReplicaResponseData, SyncGroupResponseData, UpdateMetadataResponseData}
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.{ListenerName, Send}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -88,6 +87,10 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 import kafka.coordinator.group.GroupOverview
 import kafka.server.metadata.ConfigRepository
+import org.apache.kafka.common.qcommon.ListConnections
+import org.apache.kafka.qcommon.QCommonManager
+import org.apache.kafka.qcommon.monitor.Connections
+
 
 /**
  * Logic to handle the various Kafka requests
@@ -162,7 +165,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         // before handing them to the request handler, so this path should not be exercised in practice
         throw new IllegalStateException(s"API ${request.header.apiKey} is not enabled")
       }
-
+      QCommonManager.getInstance().checkRequest(request.context)
       request.header.apiKey match {
         case ApiKeys.PRODUCE => handleProduceRequest(request)
         case ApiKeys.FETCH => handleFetchRequest(request)
@@ -222,6 +225,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.DESCRIBE_CLUSTER => handleDescribeCluster(request)
         case ApiKeys.DESCRIBE_PRODUCERS => handleDescribeProducersRequest(request)
         case ApiKeys.UNREGISTER_BROKER => maybeForwardToController(request, handleUnregisterBrokerRequest)
+        case ApiKeys.LIST_CONNECTIONS => handleListConnectionRequest(request)
         case _ => throw new IllegalStateException(s"No handler for request api key ${request.header.apiKey}")
       }
     } catch {
@@ -3319,6 +3323,23 @@ class KafkaApis(val requestChannel: RequestChannel,
       // about the new broker epoch and sends a control request with this epoch before the broker learns about it
       brokerEpochInRequest < zkSupport.controller.brokerEpoch
     }
+  }
+
+  def handleListConnectionRequest(request: RequestChannel.Request): Unit = {
+    val listConnectionsRequest = request.body[ListConnectionsRequest]
+    val listConnectionsRequestData  = listConnectionsRequest.data()
+    var connectionsList:java.util.List[Connections] = null
+    if(Objects.equals(ListConnections.CONNECTION_CURRENT_TYPE,listConnectionsRequestData.connectionType())) {
+      connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getCurrentConnections
+    }else if(Objects.equals(ListConnections.CONNECTION_CLOSE_TYPE,listConnectionsRequestData.connectionType())) {
+      connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getClosedConnections
+    }
+
+    requestHelper.sendResponseMaybeThrottle( request , requestThrottleMs =>{
+      val responseData = new ListConnectionsResponseData()
+      responseData.setData(Json.encodeAsString(connectionsList))
+      new ListConnectionsResponse(responseData)
+    })
   }
 }
 
