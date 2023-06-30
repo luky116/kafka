@@ -5233,8 +5233,4 @@ public class KafkaAdminClientTest {
         }
     }
 
-    @Test
-    public void testListConnections(){
-
-    }
 }

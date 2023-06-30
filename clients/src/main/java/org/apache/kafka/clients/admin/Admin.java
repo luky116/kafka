@@ -1498,9 +1498,8 @@ public interface Admin extends AutoCloseable {
     Map<MetricName, ? extends Metric> metrics();
 
     default  ListConnectionsResult listConnections(ListConnections listConnections){
-        return this.listConnections(listConnections , new ListConnectionsOptions());
+        return this.listConnections(listConnections, new ListConnectionsOptions());
     }
-
 
     ListConnectionsResult listConnections(ListConnections listConnections , ListConnectionsOptions listConnectionsOptions);
 }

@@ -12,7 +12,6 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.RequestContext;
-import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.qcommon.BrokerMetaData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +23,7 @@ public class ConnectionsMonitor {
 
     private Map<String, Connections>  connectMap = new ConcurrentHashMap<>();
 
-    private List<Connections>  closeConnect = new ArrayList<>();
+    private List<Connections> closedConnect = new ArrayList<>();
 
     public void setBrokerMetaData(BrokerMetaData brokerMetaData) {
         this.brokerMetaData = brokerMetaData;
@@ -74,10 +73,10 @@ public class ConnectionsMonitor {
         synchronized (this){
             // 如果没有admin client 进行采集，会出现内存溢出。
             // 防止内存溢出，超过十万就清空
-            if(closeConnect.size() > 100000){
-                closeConnect = new ArrayList<>();
+            if(closedConnect.size() > 100000){
+                closedConnect = new ArrayList<>();
             }
-            this.closeConnect.add(connect);
+            this.closedConnect.add(connect);
         }
     }
 
@@ -96,14 +95,14 @@ public class ConnectionsMonitor {
         }
     }
 
-    public List<Connections>  getCloseConnections(){
+    public List<Connections> getClosedConnections(){
         if(!this.brokerMetaData.isStart()){
             return Collections.emptyList();
         }
         List<Connections> connectList;
         synchronized (this) {
-            connectList = this.closeConnect;
-            this.closeConnect = new ArrayList<>();
+            connectList = this.closedConnect;
+            this.closedConnect = new ArrayList<>();
         }
         return connectList;
     }

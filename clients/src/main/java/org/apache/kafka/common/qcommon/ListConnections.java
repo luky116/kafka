@@ -12,7 +12,6 @@ public class ListConnections {
 
     private List<String> brokerList;
 
-
     public String getConnectionType() {
         return connectionType;
     }

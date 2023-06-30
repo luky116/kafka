@@ -31,5 +31,4 @@ public class ListConnectionsResult {
     public KafkaFuture<List<Connections>> values() {
         return future;
     }
-
 }

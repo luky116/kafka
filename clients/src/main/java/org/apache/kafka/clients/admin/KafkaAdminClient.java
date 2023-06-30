@@ -1272,7 +1272,7 @@ public class KafkaAdminClient extends AdminClient {
             try {
                 processRequests();
             } catch (Exception e){
-                e.printStackTrace();
+                log.error(e.getMessage() , e);
             }finally {
                 AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
 
@@ -4565,7 +4565,8 @@ public class KafkaAdminClient extends AdminClient {
     }
 
     @Override
-    public ListConnectionsResult listConnections(ListConnections listConnections,ListConnectionsOptions listConnectionsOptions){
+    public ListConnectionsResult listConnections(ListConnections listConnections,
+                                                 ListConnectionsOptions listConnectionsOptions){
         final KafkaFutureImpl<List<Connections>> future = new KafkaFutureImpl<>();
         final long now = time.milliseconds();
         final ListConnectionsResult listConnectionsResult = new ListConnectionsResult(future,listConnections.getBrokerList().size());

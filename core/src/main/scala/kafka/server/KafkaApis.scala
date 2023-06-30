@@ -3332,7 +3332,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     if(Objects.equals(ListConnections.CONNECTION_CURRENT_TYPE,listConnectionsRequestData.connectionType())) {
       connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getCurrentConnections
     }else if(Objects.equals(ListConnections.CONNECTION_CLOSE_TYPE,listConnectionsRequestData.connectionType())) {
-      connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getCloseConnections
+      connectionsList = QCommonManager.getInstance().getConnectionsMonitor.getClosedConnections
     }
 
     requestHelper.sendResponseMaybeThrottle( request , requestThrottleMs =>{

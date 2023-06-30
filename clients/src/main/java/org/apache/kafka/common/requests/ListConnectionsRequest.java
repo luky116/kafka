@@ -3,13 +3,13 @@ package org.apache.kafka.common.requests;
 
 import java.nio.ByteBuffer;
 import org.apache.kafka.common.message.ListConnectionsRequestData;
+import org.apache.kafka.common.message.ListConnectionsResponseData;
 import org.apache.kafka.common.message.UnregisterBrokerRequestData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 
 public class ListConnectionsRequest extends AbstractRequest{
-
 
     public static ListConnectionsRequest parse(ByteBuffer buffer, short version) {
         return new ListConnectionsRequest(new ListConnectionsRequestData(new ByteBufferAccessor(buffer), version),
@@ -39,7 +39,11 @@ public class ListConnectionsRequest extends AbstractRequest{
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        return null;
+        ListConnectionsResponseData data = new ListConnectionsResponseData();
+        data.setThrottleTimeMs(throttleTimeMs);
+        data.setErrorMessage(e.getMessage());
+        data.setErrorCode(ApiError.fromThrowable(e).error().code());
+        return new ListConnectionsResponse(data);
     }
 
     @Override

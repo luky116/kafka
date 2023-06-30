@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.network;
 
+import java.util.Objects;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.errors.AuthenticationException;
@@ -316,7 +317,7 @@ public class Selector implements Selectable, AutoCloseable {
         ChannelMetadataRegistry metadataRegistry = this.channel(id).channelMetadataRegistry();
         if (metadataRegistry.clientInformation() == null)
             metadataRegistry.registerClientInformation(ClientInformation.EMPTY);
-        QCommonManager.getInstance().getConnectionsMonitor().connectEstablish(id , socketChannel);
+        QCommonManager.getInstance().getConnectionsMonitor().connectEstablish(id, socketChannel);
     }
 
     private void ensureNotRegistered(String id) {
@@ -884,10 +885,13 @@ public class Selector implements Selectable, AutoCloseable {
         } else {
             KafkaChannel closingChannel = this.closingChannels.remove(id);
             // Close any closing channel, leave the channel in the state in which closing was triggered
-            if (closingChannel != null)
+            if (closingChannel != null) {
                 doClose(closingChannel, false);
+                channel = closingChannel;
+            }
         }
-        QCommonManager.getInstance().getConnectionsMonitor().connectClose(channel.id(),channel.selectionKey().channel());
+        if(Objects.nonNull(channel))
+            QCommonManager.getInstance().getConnectionsMonitor().connectClose(channel.id(), channel.selectionKey().channel());
     }
 
     private void maybeDelayCloseOnAuthenticationFailure(KafkaChannel channel) {
@@ -944,7 +948,7 @@ public class Selector implements Selectable, AutoCloseable {
 
         if (idleExpiryManager != null)
             idleExpiryManager.remove(channel.id());
-        QCommonManager.getInstance().getConnectionsMonitor().connectClose(channel.id(),channel.selectionKey().channel());
+        QCommonManager.getInstance().getConnectionsMonitor().connectClose(channel.id() ,channel.selectionKey().channel());
     }
 
     private void doClose(KafkaChannel channel, boolean notifyDisconnect) {

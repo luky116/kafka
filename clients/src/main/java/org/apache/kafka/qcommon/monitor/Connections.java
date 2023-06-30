@@ -32,7 +32,6 @@ public class Connections {
 
     private String clientName;
 
-
     public Long getConnectId() {
         return connectId;
     }

@@ -242,7 +242,7 @@ public abstract class AbstractResponse implements AbstractRequestResponse {
             case UNREGISTER_BROKER:
                 return UnregisterBrokerResponse.parse(responseBuffer, version);
             case LIST_CONNECTIONS:
-                return ListConnectionsResponse.parse(responseBuffer,version);
+                return ListConnectionsResponse.parse(responseBuffer, version);
             default:
                 throw new AssertionError(String.format("ApiKey %s is not currently handled in `parseResponse`, the " +
                         "code should be updated to do so.", apiKey));

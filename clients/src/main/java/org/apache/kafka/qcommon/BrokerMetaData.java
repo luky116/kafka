@@ -2,7 +2,6 @@ package org.apache.kafka.qcommon;
 
 public class BrokerMetaData {
 
-
     private boolean isStart = false;
 
     private boolean isAcl = false;
@@ -61,5 +60,18 @@ public class BrokerMetaData {
 
     public void setBrokerPort(Integer brokerPort) {
         this.brokerPort = brokerPort;
+    }
+
+
+    @Override
+    public String toString() {
+        return "BrokerMetaData{" +
+                "isStart=" + isStart +
+                ", isAcl=" + isAcl +
+                ", clusterName='" + clusterName + '\'' +
+                ", brokerName='" + brokerName + '\'' +
+                ", brokerAddress='" + brokerAddress + '\'' +
+                ", brokerPort=" + brokerPort +
+                '}';
     }
 }

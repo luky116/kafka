@@ -6,12 +6,17 @@ import java.net.NetworkInterface;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import org.apache.kafka.common.requests.RequestContext;
 import org.apache.kafka.qcommon.monitor.ConnectionsMonitor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class QCommonManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(QCommonManager.class);
 
     private static final  QCommonManager INSTANCE = new QCommonManager();
 
@@ -23,8 +28,8 @@ public class QCommonManager {
         try {
             // Traversal Network interface to get the first non-loopback and non-private address
             Enumeration<NetworkInterface> enumeration = NetworkInterface.getNetworkInterfaces();
-            ArrayList<String> ipv4Result = new ArrayList<String>();
-            ArrayList<String> ipv6Result = new ArrayList<String>();
+            List<String> ipv4Result = new ArrayList<String>();
+            List<String> ipv6Result = new ArrayList<String>();
             while (enumeration.hasMoreElements()) {
                 final NetworkInterface networkInterface = enumeration.nextElement();
                 final Enumeration<InetAddress> en = networkInterface.getInetAddresses();
@@ -58,7 +63,7 @@ public class QCommonManager {
             final InetAddress localHost = InetAddress.getLocalHost();
             return normalizeHostAddress(localHost);
         } catch (Exception e) {
-            //log.error("Failed to obtain local address", e);
+            LOGGER.error("Failed to obtain local address", e);
         }
 
         return null;
@@ -70,8 +75,6 @@ public class QCommonManager {
             return localHost.getHostAddress();
         }
     }
-
-
 
     private final BrokerMetaData brokerMetaData = new BrokerMetaData();
 
@@ -94,6 +97,7 @@ public class QCommonManager {
         brokerMetaData.setBrokerAddress(getLocalAddress());
 
         this.connectionsMonitor.setBrokerMetaData(this.brokerMetaData);
+        LOGGER.info("QCommonManager init success , broker meta data is {}" , brokerMetaData);
     }
 
     public ConnectionsMonitor getConnectionsMonitor(){
