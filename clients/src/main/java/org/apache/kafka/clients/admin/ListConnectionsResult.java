@@ -20,7 +20,6 @@ public class ListConnectionsResult {
     }
 
     public synchronized void setConnectionsList(List<Connections> connectionsList){
-
         this.connectionsList.addAll(connectionsList);
         index--;
         if(index == 0){
