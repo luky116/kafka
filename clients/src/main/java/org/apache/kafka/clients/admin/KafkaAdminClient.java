@@ -1273,6 +1273,7 @@ public class KafkaAdminClient extends AdminClient {
                 processRequests();
             } catch (Exception e){
                 log.error(e.getMessage() , e);
+                throw e;
             }finally {
                 AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
 
