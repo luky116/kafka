@@ -35,7 +35,7 @@ import kafka.network.RequestChannel
 import kafka.security.authorizer.AuthorizerUtils
 import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.utils.Implicits._
-import kafka.utils.{CoreUtils, Json, Logging}
+import kafka.utils.{CoreUtils, Logging}
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
 import org.apache.kafka.clients.admin.{AlterConfigOp, ConfigEntry}
 import org.apache.kafka.common.acl.AclOperation._
@@ -3336,8 +3336,58 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     requestHelper.sendResponseMaybeThrottle( request , requestThrottleMs =>{
+      val connectionsData:java.util.List[ListConnectionsResponseData.ConnectionData] = new util.ArrayList[ListConnectionsResponseData.ConnectionData]();
+      connectionsList.forEach( value => {
+        val data: ListConnectionsResponseData.ConnectionData = new ListConnectionsResponseData.ConnectionData();
+        if (Objects.isNull(value.getUserName)) {
+          data.setUserName("")
+        }else{
+          data.setUserName(value.getUserName)
+        }
+
+        if (Objects.isNull(value.getClientName)) {
+          data.setClientName("")
+        } else {
+          data.setClientName(value.getClientName)
+        }
+
+        if(Objects.isNull(value.getClusterName)){
+          data.setClusterName("")
+        }else{
+          data.setClusterName(value.getClusterName)
+        }
+
+        if(Objects.isNull(value.getBrokerName)){
+          data.setBrokerName("")
+        }else{
+          data.setBrokerName(value.getBrokerName)
+        }
+
+        if(Objects.isNull(value.getBrokerAddress)){
+          data.setBrokerAddress("")
+        }else{
+          data.setBrokerAddress(value.getBrokerAddress)
+        }
+        data.setBrokerPort(value.getBrokerPort)
+        if(Objects.isNull(value.getClientAddress)) {
+          data.setClientAddress("")
+        }else{
+          data.setClientAddress(value.getClientAddress)
+        }
+        data.setClientPort(Integer.valueOf(value.getClientPort))
+        if(Objects.isNull(value.getGroupType)){
+          data.setGroupType("")
+        }else{
+          data.setGroupType(value.getGroupType)
+        }
+        data.setEstablishTime(value.getEstablishTime)
+        data.setCloseTime(value.getCloseTime)
+
+        connectionsData.add(data)
+      })
+
       val responseData = new ListConnectionsResponseData()
-      responseData.setData(Json.encodeAsString(connectionsList))
+      responseData.setConnectionData(connectionsData);
       new ListConnectionsResponse(responseData)
     })
   }

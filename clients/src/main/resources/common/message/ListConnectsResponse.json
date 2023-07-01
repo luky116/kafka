@@ -34,7 +34,34 @@
     { "name": "ErrorMessage", "type": "string", "versions": "0+", "nullableVersions": "0+", "default": "null",
       "about": "The top-level error message, or null if there was no error." },
     { "name": "data", "type": "string", "versions": "0+",
-      "about": "The ID of the group to leave." }
+      "about": "The ID of the group to leave." },
+    { "name": "connectionData", "type": "[]ConnectionData", "versions": "0+",
+      "about": "The ID of the group to leave." ,"fields": [
+      { "name": "clusterName", "type": "string", "versions": "0+",
+        "about": "cluster name." },
+      { "name": "brokerName", "type": "string", "versions": "0+", "nullableVersions": "0+",
+        "about": "broker name is brokerId" },
+      { "name": "brokerAddress", "type": "string", "versions": "0+",
+        "about": "broker address" },
+      { "name": "brokerPort", "type": "int32", "versions": "0+",
+        "about": "broker prot." },
+      { "name": "channelId", "type": "string", "versions": "0+",
+        "about": "channel id." },
+      { "name": "clientAddress", "type": "string", "versions": "0+",
+        "about": "client address." },
+      { "name": "clientPort", "type": "int32", "versions": "0+",
+        "about": "client port." },
+      { "name": "establishTime", "type": "int64", "versions": "0+",
+        "about": "establish time." },
+      { "name": "closeTime", "type": "int64", "versions": "0+",
+        "about": "close time." },
+      { "name": "groupType", "type": "string", "versions": "0+",
+        "about": "group type." },
+      { "name": "userName", "type": "string", "versions": "0+",
+        "about": "user name." },
+      { "name": "clientName", "type": "string", "versions": "0+",
+        "about": "client name." }
+    ]}
 
   ]
 }
