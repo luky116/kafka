@@ -490,7 +490,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
    * @param sanitizedEntityName
    * @return
    */
-  def fetchEntityConfig(rootEntityType: String, sanitizedEntityName: String): Properties = {
+  def fetchEntityConfig(rootEntityType: String, sanitizedEntityName: String): Properties = { // brokers; <default>
     zkClient.getEntityConfigs(rootEntityType, sanitizedEntityName)
   }
 

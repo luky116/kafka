@@ -49,7 +49,7 @@ object Kafka extends Logging {
       CommandLineUtils.printVersionAndDie()
     }
 
-    val props = Utils.loadProps(args(0))
+    val props = Utils.loadProps(args(0)) // 将配置文件的内容读取到props中
 
     if (args.length > 1) {
       val options = optionParser.parse(args.slice(1, args.length): _*)
@@ -83,7 +83,8 @@ object Kafka extends Logging {
 
   def main(args: Array[String]): Unit = {
     try {
-      val serverProps = getPropsFromArgs(args)
+      // args:/Users/sanyue/code/qihoo/Qkafka/config/server.properties
+      val serverProps = getPropsFromArgs(args) // 读取配置文件
       val server = buildServer(serverProps)
 
       try {
@@ -97,7 +98,7 @@ object Kafka extends Logging {
       }
 
       // attach shutdown handler to catch terminating signals as well as normal termination
-      Exit.addShutdownHook("kafka-shutdown-hook", {
+      Exit.addShutdownHook("kafka-shutdown-hook", { // 添加关闭的钩子方法逻辑
         try server.shutdown()
         catch {
           case _: Throwable =>
@@ -107,9 +108,12 @@ object Kafka extends Logging {
         }
       })
 
-      try server.startup()
+      try{
+        server.startup() // 启动 broker
+      }
       catch {
         case e: Throwable =>
+          e.printStackTrace();
           // KafkaServer.startup() calls shutdown() in case of exceptions, so we invoke `exit` to set the status code
           fatal(e.getMessage,e)
           fatal("Exiting Kafka.")

@@ -87,14 +87,14 @@ public class QCommonManager {
         Object start = properties.get("qcommon.start");
         brokerMetaData.setStart(!Objects.isNull(start) && Boolean.parseBoolean(start.toString()));
 
-        if(Objects.nonNull(properties.get("super.users"))) {
+        if(Objects.nonNull(properties.get("super.users"))) { // 开启 ACL 功能
             brokerMetaData.setAcl(true);
         }
 
         brokerMetaData.setClusterName(properties.get("cluster.name").toString());
         brokerMetaData.setBrokerName(properties.get("broker.id").toString());
         brokerMetaData.setBrokerPort(Objects.nonNull(properties.get("port"))?Integer.parseInt(properties.get("port").toString()):9092);
-        brokerMetaData.setBrokerAddress(getLocalAddress());
+        brokerMetaData.setBrokerAddress(getLocalAddress()); // 获取本机的 IP 地址，比如：10.106.106.189
 
         this.connectionsMonitor.setBrokerMetaData(this.brokerMetaData);
         LOGGER.info("QCommonManager init success , broker meta data is {}" , brokerMetaData);

@@ -328,8 +328,8 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    * @param sanitizedEntityName entity name
    * @return The successfully gathered log configs
    */
-  def getEntityConfigs(rootEntityType: String, sanitizedEntityName: String): Properties = {
-    val getDataRequest = GetDataRequest(ConfigEntityZNode.path(rootEntityType, sanitizedEntityName))
+  def getEntityConfigs(rootEntityType: String, sanitizedEntityName: String): Properties = { // brokers; <default>
+    val getDataRequest = GetDataRequest(ConfigEntityZNode.path(rootEntityType, sanitizedEntityName)) // /config/brokers/<default>
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
 
     getDataResponse.resultCode match {

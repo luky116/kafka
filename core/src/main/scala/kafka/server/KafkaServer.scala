@@ -177,10 +177,10 @@ class KafkaServer(
     try {
       info("starting")
 
-      if (isShuttingDown.get)
+      if (isShuttingDown.get) // 如果已经关闭，不能重新启动
         throw new IllegalStateException("Kafka server is still shutting down, cannot re-start!")
 
-      if (startupComplete.get)
+      if (startupComplete.get) // 防止重复启动
         return
 
       val canStartup = isStartingUp.compareAndSet(false, true)
@@ -188,22 +188,30 @@ class KafkaServer(
         brokerState.set(BrokerState.STARTING)
 
         /* setup zookeeper */
-        initZkClient(time)
+        initZkClient(time) // 当前系统时间；初始化 zkClient，并在 zk 中创建好所有的临时节点
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* initialize features */
         _featureChangeListener = new FinalizedFeatureChangeListener(featureCache, _zkClient)
-        if (config.isFeatureVersioningSupported) {
+        if (config.isFeatureVersioningSupported) { // todo 待理解
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
         /* Get or create cluster_id */
-        _clusterId = getOrGenerateClusterId(zkClient)
+        _clusterId = getOrGenerateClusterId(zkClient) // 从ZK获取或创建集群id，规则：UUID的mostSigBits、leastSigBits组合转base64
         info(s"Cluster ID = ${clusterId}")
 
         /* load metadata */
+        // 获取brokerId及log存储路径，brokerId通过zk生成或者server.properties配置broker.id
+        // 规则：/brokers/seqid的version值 + maxReservedBrokerId（默认1000），保证唯一性
         val (preloadedBrokerMetadataCheckpoint, initialOfflineDirs) =
           BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(config.logDirs, ignoreMissing = true)
+
+        val aa = preloadedBrokerMetadataCheckpoint
+        val bb = initialOfflineDirs
+
+        info(s"aa ID = ${aa}")
+        info(s"bb ID = ${bb}")
 
         if (preloadedBrokerMetadataCheckpoint.version != 0) {
           throw new RuntimeException(s"Found unexpected version in loaded `meta.properties`: " +
@@ -211,26 +219,29 @@ class KafkaServer(
             "(which is implicit when the `version` field is missing).")
         }
 
-        /* check cluster id */
+        /* check cluster id ，确保 broker 没有假如错误的集群中*/
         if (preloadedBrokerMetadataCheckpoint.clusterId.isDefined && preloadedBrokerMetadataCheckpoint.clusterId.get != clusterId)
           throw new InconsistentClusterIdException(
             s"The Cluster ID ${clusterId} doesn't match stored clusterId ${preloadedBrokerMetadataCheckpoint.clusterId} in meta.properties. " +
             s"The broker is trying to join the wrong cluster. Configured zookeeper.connect may be wrong.")
 
         /* generate brokerId */
-        config.brokerId = getOrGenerateBrokerId(preloadedBrokerMetadataCheckpoint)
+        config.brokerId = getOrGenerateBrokerId(preloadedBrokerMetadataCheckpoint) // 将配置文件的 brokerId 和 log.dir 的 meta 的brokerId 做比较，如果不一致返回失败
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
-        this.logIdent = logContext.logPrefix
+        this.logIdent = logContext.logPrefix // [KafkaServer id=2]
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
+        // 初始化AdminZkClient，支持动态修改配置
         config.dynamicConfig.initialize(zkClient)
 
         /* start scheduler */
-        kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
+        // 初始化定时任务调度器
+        kafkaScheduler = new KafkaScheduler(config.backgroundThreads) // 10
         kafkaScheduler.startup()
 
         /* create and configure metrics */
+        // 创建及配置监控，默认使用JMX及Yammer Metrics
         kafkaYammerMetrics = KafkaYammerMetrics.INSTANCE
         kafkaYammerMetrics.configure(config.originals)
         metrics = Server.initializeMetrics(config, time, clusterId)
@@ -437,7 +448,7 @@ class KafkaServer(
       else None
     }
 
-    val secureAclsEnabled = config.zkEnableSecureAcls
+    val secureAclsEnabled = config.zkEnableSecureAcls // 是否启动 zk 的 ACL 机制
     val isZkSecurityEnabled = JaasUtils.isZkSaslEnabled() || KafkaConfig.zkTlsClientAuthEnabled(zkClientConfig)
 
     if (secureAclsEnabled && !isZkSecurityEnabled)
@@ -454,7 +465,7 @@ class KafkaServer(
     }
 
     _zkClient = createZkClient(config.zkConnect, secureAclsEnabled)
-    _zkClient.createTopLevelPaths()
+    _zkClient.createTopLevelPaths() // 在 zk 中创建好所有的临时节点
   }
 
   private def getOrGenerateClusterId(zkClient: KafkaZkClient): String = {
@@ -783,7 +794,7 @@ class KafkaServer(
    *
    * @return The brokerId.
    */
-  private def getOrGenerateBrokerId(brokerMetadata: RawMetaProperties): Int = {
+  private def getOrGenerateBrokerId(brokerMetadata: RawMetaProperties): Int = { // brokerMetadata 指的是 /tmp/kafka-logs/meta.properties 中的属性
     val brokerId = config.brokerId
 
     if (brokerId >= 0 && brokerMetadata.brokerId.exists(_ != brokerId))
@@ -794,7 +805,7 @@ class KafkaServer(
     else if (brokerMetadata.brokerId.isDefined)
       brokerMetadata.brokerId.get
     else if (brokerId < 0 && config.brokerIdGenerationEnable) // generate a new brokerId from Zookeeper
-      generateBrokerId()
+      generateBrokerId() // todo 允许自动生成 brokerId，待研究自动生成的规则
     else
       brokerId
   }

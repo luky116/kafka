@@ -152,7 +152,7 @@ object BrokerMetadataCheckpoint extends Logging {
 
     for (logDir <- logDirs) {
       val brokerCheckpointFile = new File(logDir, "meta.properties")
-      val brokerCheckpoint = new BrokerMetadataCheckpoint(brokerCheckpointFile)
+      val brokerCheckpoint = new BrokerMetadataCheckpoint(brokerCheckpointFile) // log 目录下的元文件：/tmp/kafka-logs/meta.properties
 
       try {
         brokerCheckpoint.read() match {
