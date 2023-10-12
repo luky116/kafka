@@ -95,19 +95,19 @@ import org.apache.kafka.qcommon.monitor.Connections
 /**
  * Logic to handle the various Kafka requests
  */
-class KafkaApis(val requestChannel: RequestChannel,
+class KafkaApis(val requestChannel: RequestChannel, // 请求通道
                 val metadataSupport: MetadataSupport,
-                val replicaManager: ReplicaManager,
-                val groupCoordinator: GroupCoordinator,
-                val txnCoordinator: TransactionCoordinator,
+                val replicaManager: ReplicaManager,  // 副本管理器
+                val groupCoordinator: GroupCoordinator, // 消费者组协调器组件
+                val txnCoordinator: TransactionCoordinator, // 事务管理器组件
                 val autoTopicCreationManager: AutoTopicCreationManager,
-                val brokerId: Int,
-                val config: KafkaConfig,
+                val brokerId: Int, // broker.id参数值
+                val config: KafkaConfig, // Kafka配置类
                 val configRepository: ConfigRepository,
-                val metadataCache: MetadataCache,
+                val metadataCache: MetadataCache, // 元数据缓存类
                 val metrics: Metrics,
                 val authorizer: Option[Authorizer],
-                val quotas: QuotaManagers,
+                val quotas: QuotaManagers,  // 配额管理器组件
                 val fetchManager: FetchManager,
                 brokerTopicStats: BrokerTopicStats,
                 val clusterId: String,
@@ -166,6 +166,12 @@ class KafkaApis(val requestChannel: RequestChannel,
         throw new IllegalStateException(s"API ${request.header.apiKey} is not enabled")
       }
       QCommonManager.getInstance().checkRequest(request.context)
+      // 根据请求头部信息中的apiKey字段判断属于哪类请求
+      // 然后调用响应的handle***方法
+      // 如果新增RPC协议类型，则：
+      // 1. 添加新的apiKey标识新请求类型
+      // 2. 添加新的case分支
+      // 3. 添加对应的handle***方法
       request.header.apiKey match {
         case ApiKeys.PRODUCE => handleProduceRequest(request)
         case ApiKeys.FETCH => handleFetchRequest(request)
@@ -229,7 +235,9 @@ class KafkaApis(val requestChannel: RequestChannel,
         case _ => throw new IllegalStateException(s"No handler for request api key ${request.header.apiKey}")
       }
     } catch {
+      // 如果是严重错误，则抛出异常
       case e: FatalExitError => throw e
+      // 普通异常的话，记录下错误日志
       case e: Throwable => requestHelper.handleError(request, e)
     } finally {
       // try to complete delayed action. In order to avoid conflicting locking, the actions to complete delayed requests
@@ -237,6 +245,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       // expiration thread for certain delayed operations (e.g. DelayedJoin)
       replicaManager.tryCompleteActions()
       // The local completion time may be set while processing the request. Only record it if it's unset.
+      // 记录一下请求本地完成时间，即Broker处理完该请求的时间
       if (request.apiLocalCompleteTimeNanos < 0)
         request.apiLocalCompleteTimeNanos = time.nanoseconds
     }
@@ -1459,10 +1468,12 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
     val (error, groups) = groupCoordinator.handleListGroups(states)
     if (authHelper.authorize(request.context, DESCRIBE, CLUSTER, CLUSTER_NAME))
+    // 直接使用刚才拿到的Group数据封装进Response然后发送
       // With describe cluster access all groups are returned. We keep this alternative for backward compatibility.
       requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
         createResponse(requestThrottleMs, groups, error))
     else {
+      // 找出Clients对哪些Group有GROUP资源的DESCRIBE权限，返回这些Group信息
       val filteredGroups = groups.filter(group => authHelper.authorize(request.context, DESCRIBE, GROUP, group.groupId))
       requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
         createResponse(requestThrottleMs, filteredGroups, error))
@@ -1740,12 +1751,15 @@ class KafkaApis(val requestChannel: RequestChannel,
       createTopicsRequest.data.topics.forEach { topic =>
         results.add(new CreatableTopicResult().setName(topic.name))
       }
+      // 是否具有CLUSTER资源的CREATE权限
       val hasClusterAuthorization = authHelper.authorize(request.context, CREATE, CLUSTER, CLUSTER_NAME,
         logIfDenied = false)
       val topics = createTopicsRequest.data.topics.asScala.map(_.name)
+      // 如果具有CLUSTER CREATE权限，则允许主题创建，否则，还要查看是否具有TOPIC资源的CREATE权限
       val authorizedTopics =
         if (hasClusterAuthorization) topics.toSet
         else authHelper.filterByAuthorized(request.context, CREATE, TOPIC, topics)(identity)
+      // 是否具有TOPIC资源的DESCRIBE_CONFIGS权限
       val authorizedForDescribeConfigs = authHelper.filterByAuthorized(request.context, DESCRIBE_CONFIGS, TOPIC,
         topics, logIfDenied = false)(identity).map(name => name -> results.find(name)).toMap
 
@@ -1753,10 +1767,12 @@ class KafkaApis(val requestChannel: RequestChannel,
         if (results.findAll(topic.name).size > 1) {
           topic.setErrorCode(Errors.INVALID_REQUEST.code)
           topic.setErrorMessage("Found multiple entries for this topic.")
+          // 如果不具备CLUSTER资源的CREATE权限或TOPIC资源的CREATE权限，认证失败！
         } else if (!authorizedTopics.contains(topic.name)) {
           topic.setErrorCode(Errors.TOPIC_AUTHORIZATION_FAILED.code)
           topic.setErrorMessage("Authorization failed.")
         }
+        // 如果不具备TOPIC资源的DESCRIBE_CONFIGS权限，设置主题配置错误码
         if (!authorizedForDescribeConfigs.contains(topic.name)) {
           topic.setTopicConfigErrorCode(Errors.TOPIC_AUTHORIZATION_FAILED.code)
         }

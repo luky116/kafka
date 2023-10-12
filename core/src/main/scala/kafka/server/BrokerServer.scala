@@ -331,6 +331,7 @@ class BrokerServer(
         config.nodeId, config, configRepository, metadataCache, metrics, authorizer, quotaManagers,
         fetchManager, brokerTopicStats, clusterId, time, tokenManager, apiVersionManager)
 
+      // config.numIoThreads 是 num.io.threads 的配置参数（默认是8）
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.nodeId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
         config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
 

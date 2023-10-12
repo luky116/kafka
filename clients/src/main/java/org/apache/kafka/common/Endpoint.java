@@ -29,6 +29,15 @@ import org.apache.kafka.common.security.auth.SecurityProtocol;
 @InterfaceStability.Evolving
 public class Endpoint {
 
+    /**
+     * PLAINTEXT://kafka-host:9092
+     *
+     * - host：Broker主机名。
+     * - port：Broker端口号。
+     * - listenerName：监听器名字。目前预定义的名称包括PLAINTEXT、SSL、SASL\_PLAINTEXT和SASL\_SSL。Kafka允许你自定义其他监听器名称，比如CONTROLLER、INTERNAL等。
+     * - securityProtocol：监听器使用的安全协议。Kafka支持4种安全协议，分别是 **PLAINTEXT**、 **SSL**、 **SASL\_PLAINTEXT** 和 **SASL\_SSL**。
+     */
+
     private final String listenerName;
     private final SecurityProtocol securityProtocol;
     private final String host;

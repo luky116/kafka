@@ -32,7 +32,7 @@ wrapper {
 // Additionally adds a license header to the wrapper while editing the file contents.
 task bootstrapWrapper() {
     // In the doLast block so this runs when the task is called and not during project configuration.
-    doLast {
+    doLast {n
         def wrapperBasePath = "\$APP_HOME/gradle/wrapper"
         def wrapperJarPath = wrapperBasePath + "/gradle-wrapper.jar"
 

@@ -79,10 +79,19 @@ object RequestChannel extends Logging {
     }
   }
 
-  class Request(val processor: Int,
-                val context: RequestContext,
-                val startTimeNanos: Long,
+  // 表示各类 Clients 端与 Broker 端请求
+  class Request(
+                 // 标记请求由哪个 Processor 处理，处理完成后要依赖该 Processor 将响应返回给客户端
+                val processor: Int,
+                val context: RequestContext, // 标识请求的上下文信息，包括请求头、请求体、客户端地址、客户端身份等
+                // startTimeNanos 记录了 Request 对象被创建的时间，主要用于各种时间统计指标的计算
+               // 主要用作 JMX 统计指标时使用
+                 val startTimeNanos: Long,
+               // memoryPool 表示源码定义的一个非阻塞式的内存缓冲区，主要作用是避免 Request 对象无限使用内存，导致内存溢出
                 val memoryPool: MemoryPool,
+               // buffer 是真正保存 Request 对象内容的字节缓冲区。Request 发送方必须按照 Kafka RPC
+                 //协议规定的格式向该缓冲区写入字节，否则将抛出 InvalidRequestException 异常。这个
+                 //逻辑主要是由 RequestContext 的 parseRequest 方法实现的。
                 @volatile var buffer: ByteBuffer,
                 metrics: RequestChannel.Metrics,
                 val envelope: Option[RequestChannel.Request] = None) extends BaseRequest {
@@ -306,6 +315,7 @@ object RequestChannel extends Logging {
   class SendResponse(request: Request,
                      val responseSend: Send,
                      val responseLogValue: Option[JsonNode],
+                    // onCompleteCallback 是不同类型 Response 的处理逻辑
                      val onCompleteCallback: Option[Send => Unit]) extends Response(request) {
     override def responseLog: Option[JsonNode] = responseLogValue
 
@@ -339,9 +349,15 @@ object RequestChannel extends Logging {
 class RequestChannel(val queueSize: Int,
                      val metricNamePrefix: String,
                      time: Time,
-                     val metrics: RequestChannel.Metrics) extends KafkaMetricsGroup {
+                     val metrics: RequestChannel.Metrics) extends KafkaMetricsGroup { // KafkaMetricsGroup 主要用作监控
   import RequestChannel._
+  // 用来保存 Broker 收到的各类请求，包括来自客户端的请求和来自其他 Broker 的请求
+  // 称之为请求队列，它是一个阻塞队列，用于保存 Request 对象
+  // queueSize 表示该队列的最大容量，如果队列已满，那么新的 Request 对象将无法被添加到队列中
+  // 该字段由参数 queued.max.requests 决定，默认为 500
+  // val dataPlaneRequestChannel = new RequestChannel(maxQueuedRequests, DataPlaneMetricPrefix, time, apiVersionManager.newRequestMetrics)
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
+  // Processor 是一个抽象类，它表示一个处理器，用于处理 Request 对象
   private val processors = new ConcurrentHashMap[Int, Processor]()
   val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
   val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)
@@ -354,11 +370,13 @@ class RequestChannel(val queueSize: Int,
     }
   })
 
+  // 添加 Processor 对象（负责请求分发给handler线程处理）到 processors 集合中
   def addProcessor(processor: Processor): Unit = {
     if (processors.putIfAbsent(processor.id, processor) != null)
       warn(s"Unexpected processor with processorId ${processor.id}")
 
     newGauge(responseQueueSizeMetricName, () => processor.responseQueueSize,
+      // 为 processor 对象创建监控指标
       Map(ProcessorMetricTag -> processor.id.toString))
   }
 
@@ -404,10 +422,12 @@ class RequestChannel(val queueSize: Int,
       case _: StartThrottlingResponse | _: EndThrottlingResponse => ()
     }
 
+    // 根据编号找到 processor
     val processor = processors.get(response.processor)
     // The processor may be null if it was shutdown. In this case, the connections
     // are closed, so the response is dropped.
     if (processor != null) {
+      // 将请求放到 Processor 的 responseQueue 队列中，等待 Processor 处理
       processor.enqueueResponse(response)
     }
   }
@@ -443,13 +463,30 @@ object RequestMetrics {
   val consumerFetchMetricName = ApiKeys.FETCH.name + "Consumer"
   val followFetchMetricName = ApiKeys.FETCH.name + "Follower"
 
+  // 每秒处理的 Request 数，用来评估 Broker 的繁忙状态。
   val RequestsPerSec = "RequestsPerSec"
+  // 计算 Request 在 Request 队列中的平均等候时间，单位是
+  //毫秒。倘若 Request 在队列的等待时间过长，你通常需要增加后端 I/O 线程的数量，来
+  //加快队列中 Request 的拿取速度。
   val RequestQueueTimeMs = "RequestQueueTimeMs"
+  // 计算 Request 实际被处理的时间，单位是毫秒。一旦定位到这个监控
+  //项的值很大，你就需要进一步研究 Request 被处理的逻辑了，具体分析到底是哪一步消
+  //耗了过多的时间
   val LocalTimeMs = "LocalTimeMs"
+  // Kafka 的读写请求（PRODUCE 请求和 FETCH 请求）逻辑涉及等待
+  //其他 Broker 操作的步骤。RemoteTimeMs 计算的，就是等待其他 Broker 完成指定逻
+  //辑的时间。因为等待的是其他 Broker，因此被称为 Remote Time。这个监控项非常重
+  //要！Kafka 生产环境中设置 acks=all 的 Producer 程序发送消息延时高的主要原因，往
+  //往就是 Remote Time 高。因此，如果你也碰到了这样的问题，不妨先定位一下
+  //Remote Time 是不是瓶颈
   val RemoteTimeMs = "RemoteTimeMs"
+
   val ThrottleTimeMs = "ThrottleTimeMs"
   val ResponseQueueTimeMs = "ResponseQueueTimeMs"
   val ResponseSendTimeMs = "ResponseSendTimeMs"
+  // 计算 Request 被处理的完整流程时间。这是最实用的监控指标，没有
+  //之一！毕竟，我们通常都是根据 TotalTimeMs 来判断系统是否出现问题的。一旦发现了
+  //问题，我们才会利用前面的几个监控项进一步定位问题的原因。
   val TotalTimeMs = "TotalTimeMs"
   val RequestBytes = "RequestBytes"
   val MessageConversionsTimeMs = "MessageConversionsTimeMs"
