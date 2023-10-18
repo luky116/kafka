@@ -331,6 +331,7 @@ class SocketServer(val config: KafkaConfig,
       val processor = newProcessor(nextProcessorId, dataPlaneRequestChannel, connectionQuotas,
         listenerName, securityProtocol, memoryPool, isPrivilegedListener)
       listenerProcessors += processor
+      // todo 为啥要往 requestChannel 添加 processor 呢？？？
       dataPlaneRequestChannel.addProcessor(processor)
       nextProcessorId += 1
     }
@@ -875,7 +876,7 @@ private[kafka] class Processor(val id: Int,
                                credentialProvider: CredentialProvider,
                                memoryPool: MemoryPool,
                                logContext: LogContext,
-                               connectionQueueSize: Int, // 写死了 20，无法修改
+                               connectionQueueSize: Int,
                                isPrivilegedListener: Boolean,
                                apiVersionManager: ApiVersionManager) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {
 
@@ -1166,11 +1167,14 @@ private[kafka] class Processor(val id: Int,
   }
 
   private def processCompletedSends(): Unit = {
+    // 遍历底层SocketChannel已发送的Response
     selector.completedSends.forEach { send =>
       try {
+        // 取出对应inflightResponses中的Response
         val response = inflightResponses.remove(send.destinationId).getOrElse {
           throw new IllegalStateException(s"Send for ${send.destinationId} completed, but not in `inflightResponses`")
         }
+        // 更新一些统计指标
         updateRequestMetrics(response)
 
         // Invoke send completion callback

@@ -34,17 +34,18 @@ import java.util.Set;
  */
 public final class Cluster {
 
+    // 从命名直接就看出了各个变量的用途
     private final boolean isBootstrapConfigured;
-    private final List<Node> nodes;
-    private final Set<String> unauthorizedTopics;
-    private final Set<String> invalidTopics;
-    private final Set<String> internalTopics;
+    private final List<Node> nodes; // node 列表
+    private final Set<String> unauthorizedTopics; // 未认证的 topic 列表
+    private final Set<String> invalidTopics; // 不合理的 topic
+    private final Set<String> internalTopics; // 内置的 topic 列表
     private final Node controller;
-    private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
-    private final Map<String, List<PartitionInfo>> partitionsByTopic;
-    private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
-    private final Map<Integer, List<PartitionInfo>> partitionsByNode;
-    private final Map<Integer, Node> nodesById;
+    private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition; // partition 的详细信息
+    private final Map<String, List<PartitionInfo>> partitionsByTopic; // topic 与 partition 的对应关系
+    private final Map<String, List<PartitionInfo>> availablePartitionsByTopic; //  可用（leader 不为 null）的 topic 与 partition 的对应关系
+    private final Map<Integer, List<PartitionInfo>> partitionsByNode; // node 与 partition 的对应关系
+    private final Map<Integer, Node> nodesById; // node 与 id 的对应关系
     private final ClusterResource clusterResource;
     private final Map<String, Uuid> topicIds;
 

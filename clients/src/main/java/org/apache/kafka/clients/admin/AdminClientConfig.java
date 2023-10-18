@@ -123,6 +123,7 @@ public class AdminClientConfig extends AbstractConfig {
     private static final String SECURITY_PROVIDERS_DOC = SecurityConfig.SECURITY_PROVIDERS_DOC;
 
     static {
+        // 设置 config 的默认值
         CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
                                         Type.LIST,
                                         Importance.HIGH,

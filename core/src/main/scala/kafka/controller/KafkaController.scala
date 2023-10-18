@@ -120,6 +120,7 @@ class KafkaController(val config: KafkaConfig,
   private val logDirEventNotificationHandler = new LogDirEventNotificationHandler(eventManager)
 
   @volatile private var activeControllerId = -1
+  // 统计集群中所有离线或处于不可用状态的主题分区数量
   @volatile private var offlinePartitionCount = 0
   @volatile private var preferredReplicaImbalanceCount = 0
   @volatile private var globalTopicCount = 0
@@ -580,14 +581,18 @@ class KafkaController(val config: KafkaConfig,
    */
   private def onBrokerFailure(deadBrokers: Seq[Int]): Unit = {
     info(s"Broker failure callback for ${deadBrokers.mkString(",")}")
+    // deadBrokers：给定的一组已终止运行的Broker Id列表
+    // 更新Controller元数据信息，将给定Broker从元数据的replicasOnOfflineDirs中移除
     deadBrokers.foreach(controllerContext.replicasOnOfflineDirs.remove)
+    // 找出这些Broker上的所有副本对象
     val deadBrokersThatWereShuttingDown =
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
     if (deadBrokersThatWereShuttingDown.nonEmpty)
       info(s"Removed ${deadBrokersThatWereShuttingDown.mkString(",")} from list of shutting down brokers.")
+    // 执行副本清扫工作
     val allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokers.toSet)
     onReplicasBecomeOffline(allReplicasOnDeadBrokers)
-
+    // 取消这些Broker上注册的ZooKeeper监听器
     unregisterBrokerModificationsHandler(deadBrokers)
   }
 
@@ -1631,12 +1636,18 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def processTopicChange(): Unit = {
+    // 如果Contorller已经关闭/当前 broker 不是 controller，直接返回
     if (!isActive) return
+    // 从ZooKeeper中获取当前所有主题列表
     val topics = zkClient.getAllTopicsInCluster(true)
+    // 找出当前元数据中不存在、ZooKeeper中存在的主题，视为新增主题
     val newTopics = topics -- controllerContext.allTopics
+    // 找出当前元数据中存在、ZooKeeper中不存在的主题，视为已删除主题
     val deletedTopics = controllerContext.allTopics.diff(topics)
+    // 更新Controller元数据
     controllerContext.setAllTopics(topics)
 
+    // 为新增主题和已删除主题执行后续处理操作
     registerPartitionModificationsHandlers(newTopics.toSeq)
     val addedPartitionReplicaAssignment = zkClient.getReplicaAssignmentAndTopicIdForTopics(newTopics)
     deletedTopics.foreach(controllerContext.removeTopic)
@@ -2590,9 +2601,16 @@ case class LeaderIsrAndControllerEpoch(leaderAndIsr: LeaderAndIsr, controllerEpo
 }
 
 private[controller] class ControllerStats extends KafkaMetricsGroup {
+  // 统计每秒发生的Unclean Leader选举次数（这可能造成数据丢失）
   val uncleanLeaderElectionRate = newMeter("UncleanLeaderElectionsPerSec", "elections", TimeUnit.SECONDS)
 
   val rateAndTimeMetrics: Map[ControllerState, KafkaTimer] = ControllerState.values.flatMap { state =>
+    // Controller事件通用的统计速率指标的方法
+    /**
+     * 是统计所有Controller状态的速率和时间信息，单位是毫秒。当前，Controller定义了很多事件，
+     * 比如，TopicDeletion是执行主题删除的Controller事件、ControllerChange是执行Controller重选举的事件。
+     * ControllerStats的这个指标通过在每个事件名后拼接字符串RateAndTimeMs的方式，为每类Controller事件都创建了对应的速率监控指标。
+     */
     state.rateAndTimeMetricName.map { metricName =>
       state -> new KafkaTimer(newTimer(metricName, TimeUnit.MILLISECONDS, TimeUnit.SECONDS))
     }

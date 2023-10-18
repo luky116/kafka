@@ -388,12 +388,14 @@ public class Selector implements Selectable, AutoCloseable {
      */
     public void send(NetworkSend send) {
         String connectionId = send.destinationId();
+        // 看看send要发的这个nodeId在不在
         KafkaChannel channel = openOrClosingChannelOrFail(connectionId);
         if (closingChannels.containsKey(connectionId)) {
             // ensure notification via `disconnected`, leave channel in the state in which closing was triggered
             this.failedSends.add(connectionId);
         } else {
             try {
+                // 把数据扔进KafkaChannel中（只能放一个，放多个会报错），并关注write事件
                 channel.setSend(send);
             } catch (Exception e) {
                 // update the state for consistency, the channel will be discarded after `close`
@@ -980,6 +982,7 @@ public class Selector implements Selectable, AutoCloseable {
     }
 
     private KafkaChannel openOrClosingChannelOrFail(String id) {
+        // 这里会根据 id 选取合适的 broker，bookstrapServers 为 broker 为 -1
         KafkaChannel channel = this.channels.get(id);
         if (channel == null)
             channel = this.closingChannels.get(id);

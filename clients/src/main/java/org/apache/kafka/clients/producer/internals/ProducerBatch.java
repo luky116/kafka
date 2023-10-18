@@ -64,6 +64,7 @@ public final class ProducerBatch {
     final ProduceRequestResult produceFuture;
 
     private final List<Thunk> thunks = new ArrayList<>();
+    // 实际存放数据的地方
     private final MemoryRecordsBuilder recordsBuilder;
     private final AtomicInteger attempts = new AtomicInteger(0);
     private final boolean isSplitBatch;
@@ -101,9 +102,12 @@ public final class ProducerBatch {
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, long now) {
+        // 当前 batch 是否还有足够的空间添加新纪录
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
+            // 当前 batch 空间不够，返回 null
             return null;
         } else {
+            // 添加到当前 batch 中
             Long checksum = this.recordsBuilder.append(timestamp, key, value, headers);
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));

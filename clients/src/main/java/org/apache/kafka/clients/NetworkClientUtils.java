@@ -39,6 +39,7 @@ public final class NetworkClientUtils {
      * to tell whether the latter completed a new connection.
      */
     public static boolean isReady(KafkaClient client, Node node, long currentTime) {
+        // todo 待理解
         client.poll(0, currentTime);
         return client.isReady(node, currentTime);
     }

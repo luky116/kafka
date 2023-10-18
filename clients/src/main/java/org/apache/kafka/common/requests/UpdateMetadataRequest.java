@@ -41,6 +41,11 @@ import java.util.Map;
 
 import static java.util.Collections.singletonList;
 
+/**
+ * 顾名思义，该请求会更新Broker上的元数据缓存。
+ * 集群上的所有元数据变更，都首先发生在Controller端，然后再经由这个请求广播给集群上的所有Broker。
+ * 在我刚刚分享的案例中，正是因为这个请求被处理得不及时，才导致集群Broker无法获取到最新的元数据信息。
+ */
 public class UpdateMetadataRequest extends AbstractControlRequest {
 
     public static class Builder extends AbstractControlRequest.Builder<UpdateMetadataRequest> {

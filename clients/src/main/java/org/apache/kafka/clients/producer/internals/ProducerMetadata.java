@@ -113,9 +113,11 @@ public class ProducerMetadata extends Metadata {
     /**
      * Wait for metadata update until the current version is larger than the last version we know of
      */
+    // 更新 metadata 信息（根据当前 version 值来判断）
     public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
         long currentTimeMs = time.milliseconds();
         long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
+        // 之类会阻塞等待 metadata 请求返回结果
         time.waitObject(this, () -> {
             // Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
             maybeThrowFatalException();

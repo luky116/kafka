@@ -358,6 +358,7 @@ class RequestChannel(val queueSize: Int,
   // val dataPlaneRequestChannel = new RequestChannel(maxQueuedRequests, DataPlaneMetricPrefix, time, apiVersionManager.newRequestMetrics)
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
   // Processor 是一个抽象类，它表示一个处理器，用于处理 Request 对象
+  // 注意，这个 procesor 和 Acceptor 中同一个
   private val processors = new ConcurrentHashMap[Int, Processor]()
   val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
   val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)

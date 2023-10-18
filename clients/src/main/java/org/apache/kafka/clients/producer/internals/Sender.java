@@ -79,6 +79,7 @@ public class Sender implements Runnable {
     private final RecordAccumulator accumulator;
 
     /* the metadata for the client */
+    // 发送消息时，依赖这个对象的 cluste人属性，来确定 partition leader broker，发送消息
     private final ProducerMetadata metadata;
 
     /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
@@ -239,6 +240,7 @@ public class Sender implements Runnable {
         // main loop, runs until close is called
         while (running) {
             try {
+                // 核心逻辑
                 runOnce();
             } catch (Exception e) {
                 log.error("Uncaught error in kafka producer I/O thread: ", e);
@@ -323,16 +325,21 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
+        // 将记录批次转移到每个节点的生产请求列表中
         long pollTimeout = sendProducerData(currentTimeMs);
+        // 轮询进行消息发送，或是读取请求返回值，并进行处理
+        // 这里会定时检查是否有待发送的请求，比如 UpdateMetadataRequest（消息发送请求等）等
         client.poll(pollTimeout, currentTimeMs);
     }
 
     private long sendProducerData(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        // 获取那些已经可以发送的 RecordBatch 对应的 nodes（partition leader broker）
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        // 如果有 topic-partition 的 leader 是未知的,就强制 metadata 更新
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
             // topics which may have expired. Add the topic again to metadata to ensure it is included
@@ -346,6 +353,7 @@ public class Sender implements Runnable {
         }
 
         // remove any nodes we aren't ready to send to
+        // 如果与node 没有连接（如果可以连接,同时初始化该连接）,就证明该 node 暂时不能发送数据,暂时移除该 node
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
@@ -357,10 +365,12 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        // 返回该 node 对应的所有可以发送的 RecordBatch 组成的 batches（key 是 node.id）,并将 RecordBatch 从对应的 queue 中移除
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
+            //记录将要发送的 RecordBatch
             for (List<ProducerBatch> batchList : batches.values()) {
                 for (ProducerBatch batch : batchList)
                     this.accumulator.mutePartition(batch.topicPartition);
@@ -368,6 +378,7 @@ public class Sender implements Runnable {
         }
 
         accumulator.resetNextBatchExpiryTime();
+        // 将由于元数据不可用而导致发送超时的 RecordBatch 移除
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
@@ -404,6 +415,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
+        // 发送 RecordBatch
         sendProduceRequests(batches, now);
         return pollTimeout;
     }

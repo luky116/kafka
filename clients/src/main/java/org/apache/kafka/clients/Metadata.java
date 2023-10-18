@@ -131,6 +131,8 @@ public class Metadata implements Closeable {
      * @return remaining time in ms till updating the cluster info
      */
     public synchronized long timeToNextUpdate(long nowMs) {
+        // needFullUpdate 表示立即更新，返回0表示立即更新
+        // 否则通过计算上次更新时间，以及 metadata 有效期，计算出下次更新时间
         long timeToExpire = updateRequested() ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
         return Math.max(timeToExpire, timeToAllowUpdate(nowMs));
     }
