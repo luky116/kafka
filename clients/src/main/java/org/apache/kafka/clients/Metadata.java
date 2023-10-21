@@ -60,20 +60,30 @@ import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPO
  */
 public class Metadata implements Closeable {
     private final Logger log;
+    // retry.backoff.ms: 默认值为100ms，它用来设定两次重试之间的时间间隔，避免无效的频繁重试。
     private final long refreshBackoffMs;
+    // metadata.max.age.ms: 默认值为300000，如果在这个时间内元数据没有更新的话会被强制更新。
     private final long metadataExpireMs;
+    // 更新版本号，每更新成功1次，version自增1,主要是用于判断metadata是否更新
     private int updateVersion;  // bumped on every metadata response
+    // 请求版本号，每发送一次请求，version自增1
     private int requestVersion; // bumped on every new topic addition
+    // 上一次更新的时间（包含更新失败）
     private long lastRefreshMs;
+    // 上一次更新成功的时间
     private long lastSuccessfulRefreshMs;
     private KafkaException fatalException;
+    // 非法的topics
     private Set<String> invalidTopics;
+    // 未认证的topics
     private Set<String> unauthorizedTopics;
     private MetadataCache cache = MetadataCache.empty();
     private boolean needFullUpdate;
     private boolean needPartialUpdate;
+    // 会收到metadata updates的Listener列表
     private final ClusterResourceListeners clusterResourceListeners;
     private boolean isClosed;
+    // 存储Partition最近一次的leaderEpoch
     private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;
 
     /**

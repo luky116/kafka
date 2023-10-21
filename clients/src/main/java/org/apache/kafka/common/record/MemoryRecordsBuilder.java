@@ -313,6 +313,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
         validateProducerState();
 
+        // 不允许添加新的 record
         closeForRecordAppends();
 
         if (numRecords == 0L) {

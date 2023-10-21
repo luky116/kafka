@@ -82,6 +82,7 @@ public class NetworkClient implements KafkaClient {
     private final Logger log;
 
     /* the selector used to perform network i/o */
+    // Kafka的Selector，用来异步发送网络数据
     private final Selectable selector;
 
     private final MetadataUpdater metadataUpdater;
@@ -89,6 +90,7 @@ public class NetworkClient implements KafkaClient {
     private final Random randOffset;
 
     /* the state of each node's connection */
+    // 保存与每个节点的连接状态
     private final ClusterConnectionStates connectionStates;
 
     /* the set of requests currently being sent or awaiting a response */
@@ -449,7 +451,9 @@ public class NetworkClient implements KafkaClient {
      * @param now the current timestamp
      */
     private boolean canSendRequest(String node, long now) {
+        // 和这个 node 的链接是否建立，selector 是否已经准备好
         return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
+                // 如果这个 node 有 maxInFlightRequestsPerConnection 个请求未返回，则不能往这个 node 发送请求
             inFlightRequests.canSendMore(node);
     }
 
@@ -474,7 +478,7 @@ public class NetworkClient implements KafkaClient {
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now) {
         ensureActive();
         String nodeId = clientRequest.destination();
-        // 如果是不是内部请求，需要校验请求合法性，非法请求直接拦截住
+        // 如果是不是内部请求（查询 metadata 和 apiVersion），需要校验请求合法性，非法请求直接拦截住
         if (!isInternalRequest) {
             // If this request came from outside the NetworkClient, validate
             // that we can send data.  If the request is internal, we trust
@@ -482,6 +486,9 @@ public class NetworkClient implements KafkaClient {
             // will be slightly different for some internal requests (for
             // example, ApiVersionsRequests can be sent prior to being in
             // READY state.)
+            // 1、这个 node 没有要查询 meta 的请求
+            // 2、这个 node 未完成的请求数量小于 maxInFlightRequestsPerConnection
+            // 3、这个 node 已经建立连接
             if (!canSendRequest(nodeId, now))
                 throw new IllegalStateException("Attempt to send a request to node " + nodeId + " which is not ready.");
         }
@@ -555,7 +562,7 @@ public class NetworkClient implements KafkaClient {
         // 判断当前 NetWorkClient 是否处于激活状态
         ensureActive();
 
-        // 先处理被中断的响应
+        // 先处理被中断的响应（比如，UnsupportedVersionException），如果有则立即处理
         if (!abortedSends.isEmpty()) {
             // If there are aborted sends because of unsupported version exceptions or disconnects,
             // handle them immediately without waiting for Selector#poll.
@@ -1051,6 +1058,7 @@ public class NetworkClient implements KafkaClient {
             // should we update our metadata?
             // 获取下一次更新时间，如果 needUpdate 返回 true，那么就会返回 0，即马上更新；否则返回剩余过期时间，即下次更新的时间间隔
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
+            // 计算等待时间，如果有正在处理的请求，则返回默认请求间隔的时间，否则返回 0
             long waitForMetadataFetch = hasFetchInProgress() ? defaultRequestTimeoutMs : 0;
 
             long metadataTimeout = Math.max(timeToNextMetadataUpdate, waitForMetadataFetch);
@@ -1062,7 +1070,7 @@ public class NetworkClient implements KafkaClient {
             // Beware that the behavior of this method and the computation of timeouts for poll() are
             // highly dependent on the behavior of leastLoadedNode.
             // 选择一个连接数最小的节点
-            // 备注：获取 metadata 的请求，也是随机取一个负载最小的节点来发送的。并不是一定从 bootstrap broker 来获取
+            // 备注：获取 metadata 的请求，也是取负载最小的节点来发送的。并不是一定从 bootstrap broker 来获取
             Node node = leastLoadedNode(now);
             if (node == null) {
                 log.debug("Give up sending metadata request since no node is available");
@@ -1166,9 +1174,10 @@ public class NetworkClient implements KafkaClient {
             if (canSendRequest(nodeConnectionId, now)) {
                 // 这里会判断，是否拉取 topic 的全部 partition 信息，还是只拉取其中一个 partition 信息
                 Metadata.MetadataRequestAndVersion requestAndVersion = metadata.newMetadataRequestAndVersion(now);
+                // 创建 metadata 请求
                 MetadataRequest.Builder metadataRequest = requestAndVersion.requestBuilder;
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node);
-                // 发送 metadata 请求
+                // 调用NetworkClient的doSend方法，发送更新metadata请求
                 /**
                  * 接收请求的地方在这里：
                  * @see org.apache.kafka.clients.NetworkClient#handleCompletedReceives(java.util.List, long)

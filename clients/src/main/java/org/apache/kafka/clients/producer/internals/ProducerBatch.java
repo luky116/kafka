@@ -61,8 +61,10 @@ public final class ProducerBatch {
 
     final long createdMs;
     final TopicPartition topicPartition;
+    // todo 啥含义？？？
     final ProduceRequestResult produceFuture;
 
+    // 用来存放回调函数和对应的 FutureRecordMetadata
     private final List<Thunk> thunks = new ArrayList<>();
     // 实际存放数据的地方
     private final MemoryRecordsBuilder recordsBuilder;
@@ -74,6 +76,7 @@ public final class ProducerBatch {
     int maxRecordSize;
     private long lastAttemptMs;
     private long lastAppendTime;
+    // 被拉取出来（准备发送给 broker）的时间
     private long drainedMs;
     private boolean retry;
     private boolean reopened;
@@ -109,9 +112,12 @@ public final class ProducerBatch {
         } else {
             // 添加到当前 batch 中
             Long checksum = this.recordsBuilder.append(timestamp, key, value, headers);
+            // 记录 batch 中最大的消息大小
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
+            // 记录 batch 最后添加记录的时间
             this.lastAppendTime = now;
+            // 这个值会返回给调用 sender 的线程
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
@@ -175,9 +181,9 @@ public final class ProducerBatch {
      * once or twice on a batch. It may be called twice if
      * 1. An inflight batch expires before a response from the broker is received. The batch's final
      * state is set to FAILED. But it could succeed on the broker and second time around batch.done() may
-     * try to set SUCCEEDED final state.
+     * try to set SUCCEEDED final state. 消息投递超时调用一次，投递结果返回再调用一次
      * 2. If a transaction abortion happens or if the producer is closed forcefully, the final state is
-     * ABORTED but again it could succeed if broker responds with a success.
+     * ABORTED but again it could succeed if broker responds with a success. 在进行事务操作时，强制关闭生产者时，调用一次，投递结果返回再调用一次
      *
      * Attempted transitions from [FAILED | ABORTED] --> SUCCEEDED are logged.
      * Attempted transitions from one failure state to the same or a different failed state are ignored.
@@ -197,13 +203,16 @@ public final class ProducerBatch {
             log.trace("Failed to produce messages to {} with base offset {}.", topicPartition, baseOffset, exception);
         }
 
+        // 只有原来数据为空，才会设置为 tryFinalState。意思是只会修改一次
         if (this.finalState.compareAndSet(null, tryFinalState)) {
             completeFutureAndFireCallbacks(baseOffset, logAppendTime, exception);
             return true;
         }
 
-        if (this.finalState.get() != FinalState.SUCCEEDED) {
-            if (tryFinalState == FinalState.SUCCEEDED) {
+        // 走到这里，说明 finalState 本来就有值。也就是会所这个方法不是第一次被调用
+        if (this.finalState.get() != FinalState.SUCCEEDED) { // FAILED、null、ABORTED
+            if (tryFinalState == FinalState.SUCCEEDED) { // 说明 finalState 本来就有值，且不是 SUCCEEDED
+                //
                 // Log if a previously unsuccessful batch succeeded later on.
                 log.debug("ProduceResponse returned {} for {} after batch with base offset {} had already been {}.",
                     tryFinalState, topicPartition, baseOffset, this.finalState.get());
@@ -212,13 +221,14 @@ public final class ProducerBatch {
                 log.debug("Ignored state transition {} -> {} for {} batch with base offset {}",
                     this.finalState.get(), tryFinalState, topicPartition, baseOffset);
             }
-        } else {
+        } else { // 本来就是成功的，不能再修改了
             // A SUCCESSFUL batch must not attempt another state change.
             throw new IllegalStateException("A " + this.finalState.get() + " batch must not attempt another state change to " + tryFinalState);
         }
         return false;
     }
 
+    // batch 消息投递完成后，会执行回调函数
     private void completeFutureAndFireCallbacks(long baseOffset, long logAppendTime, RuntimeException exception) {
         // Set the future before invoking the callbacks as we rely on its state for the `onCompletion` call
         produceFuture.set(baseOffset, logAppendTime, exception);

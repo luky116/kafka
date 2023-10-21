@@ -119,6 +119,7 @@ public class Sender implements Runnable {
     private final TransactionManager transactionManager;
 
     // A per-partition queue of batches ordered by creation time for tracking the in-flight batches
+    // 存放已发送请求，但是暂未回复的 batch
     private final Map<TopicPartition, List<ProducerBatch>> inFlightBatches;
 
     public Sender(LogContext logContext,
@@ -327,8 +328,8 @@ public class Sender implements Runnable {
         long currentTimeMs = time.milliseconds();
         // 将记录批次转移到每个节点的生产请求列表中
         long pollTimeout = sendProducerData(currentTimeMs);
+        // 定时检查是否有待发送的请求，比如 UpdateMetadataRequest（消息发送请求等）等
         // 轮询进行消息发送，或是读取请求返回值，并进行处理
-        // 这里会定时检查是否有待发送的请求，比如 UpdateMetadataRequest（消息发送请求等）等
         client.poll(pollTimeout, currentTimeMs);
     }
 
@@ -349,6 +350,7 @@ public class Sender implements Runnable {
 
             log.debug("Requesting metadata update due to unknown leader topics from the batched records: {}",
                 result.unknownLeaderTopics);
+            // 强制更新 metadata 信息
             this.metadata.requestUpdate();
         }
 
@@ -358,6 +360,7 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            // 和对应的 node 建立连接（假如此时没有建立连接的话）
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.pollDelayMs(node, now));
@@ -380,6 +383,7 @@ public class Sender implements Runnable {
         accumulator.resetNextBatchExpiryTime();
         // 将由于元数据不可用而导致发送超时的 RecordBatch 移除
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
+        // 超时未发送给 broker 的记录会被标记为失败
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
 

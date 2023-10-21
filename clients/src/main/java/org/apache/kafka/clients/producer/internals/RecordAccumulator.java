@@ -67,7 +67,9 @@ public final class RecordAccumulator {
 
     private final Logger log;
     private volatile boolean closed;
+    // 记录正在发送给 broker 的 batch 数量
     private final AtomicInteger flushesInProgress;
+    // 记录正在添加的消息数量
     private final AtomicInteger appendsInProgress;
     // 每次分配内存的大小，当达到这个上限，会将 batch 置为关闭的状态，表示这个 batch 可以发送到 broker
     private final int batchSize;
@@ -77,7 +79,8 @@ public final class RecordAccumulator {
     private final int lingerMs;
     // 消息发送失败后，重试的时间间隔
     private final long retryBackoffMs;
-    // todo 投递消息的超时时间
+    // 一个batch从创建到发送的最大时间间隔，如果超过这个时间，batch 会被当做失败处理，直接打印日志，不再投递 broker
+    // todo 这样可能导致数据丢失？
     private final int deliveryTimeoutMs;
     // 一次性分配好的最大内存，后续所有内存都从这里来申请
     private final BufferPool free;
@@ -185,34 +188,39 @@ public final class RecordAccumulator {
      *                        running the partitioner's onNewBatch method before trying to append again
      * @param nowMs The current time, in milliseconds
      */
-    // 往 accumulator 添加消息
-    public RecordAppendResult append(TopicPartition tp,
-                                     long timestamp,
-                                     byte[] key,
-                                     byte[] value,
-                                     Header[] headers,
-                                     Callback callback,
-                                     long maxTimeToBlock,
-                                     boolean abortOnNewBatch,
-                                     long nowMs) throws InterruptedException {
+    // 当用户调用 send 方法时，实际上是往 accumulator 添加消息
+    public RecordAppendResult append(TopicPartition tp, // 消息所属的 topic-partition 信息
+                                     long timestamp, // 消息创建时间
+                                     byte[] key,    // 消息 key
+                                     byte[] value,  // 消息 value
+                                     Header[] headers,  // 消息头
+                                     Callback callback, // 用户回调方法
+                                     long maxTimeToBlock,   // 消息在内存中阻塞（停留）的最大时间
+                                     boolean abortOnNewBatch,   // 如果是新建的 batch，是否直接返回
+                                     long nowMs) throws InterruptedException {  // 投递消息的时间
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
+        // 这里记录正在添加消息的数量，用于在 abortIncompleteBatches() 方法中确保不会丢失 batch
         appendsInProgress.incrementAndGet();
         ByteBuffer buffer = null;
         if (headers == null) headers = Record.EMPTY_HEADERS;
         try {
             // check if we have an in-progress batch
+            // 从 batches 中获取 topic-partition 对应的 batch 集合，如果不存在，则创建一个
             Deque<ProducerBatch> dq = getOrCreateDeque(tp);
             // 在对一个 queue 进行操作时,会保证线程安全
             synchronized (dq) {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
-                // null 说明没能直接在现有的batch上追加成功（也可能还没有batch），此时需要初始化新的ProducerBatch
+                // 如果当前 topic-partition 没有创建的 batch，返回 null
+                // 如果当前 topic-partition 最后一个 batch 空间不够存放当前消息，则关闭该 batch，并返回 null
+                // 如果最后一个 batch 空间足够，则将消息放到这个 batch 中，并返回 future 对象
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null)
                     return appendResult;
             }
 
+            // 判断是否第一次进来分配batch，如果是第一次分配完直接返回
             // we don't have an in-progress record batch try to allocate a new batch
             if (abortOnNewBatch) {
                 // Return a result that will cause another call to append.
@@ -225,21 +233,29 @@ public final class RecordAccumulator {
             // 要为其分配的大小是: max（batch.size, 加上头文件的本条消息的大小）
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, tp.topic(), tp.partition(), maxTimeToBlock);
+            // 从 buffer 中分配内存空间
             buffer = free.allocate(size, maxTimeToBlock);
 
             // Update the current time in case the buffer allocation blocked above.
             nowMs = time.milliseconds();
+            /**
+             * 步骤6 代码能够走到这里，可能有几种因素
+             * 1. 没有分配Buffer，需要在这里分配空间
+             * 2. batch已经满了，所以需要分配buffer重新添加
+             */
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
 
+                // 可能是因为被别的线程抢先一步添加了 batch，所以这里需要重试
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     return appendResult;
                 }
 
+                // 新建 batch
                 MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, maxUsableMagic);
                 ProducerBatch batch = new ProducerBatch(tp, recordsBuilder, nowMs);
                 FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers,
@@ -251,6 +267,7 @@ public final class RecordAccumulator {
                 incomplete.add(batch);
 
                 // Don't deallocate this buffer in the finally block as it's being used in the record batch
+                // todo 这里是什么意思？
                 buffer = null;
                 return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true, false);
             }
@@ -272,7 +289,7 @@ public final class RecordAccumulator {
 
     /**
      *  Try to append to a ProducerBatch.
-     *
+     * 如果batch 已经满了，则会关闭该batch，并且释放部分相关的资源
      *  If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
      *  resources like compression buffers. The batch will be fully closed (ie. the record batch headers will be written
      *  and memory records built) in one of the following cases (whichever comes first): right before send,
@@ -280,14 +297,17 @@ public final class RecordAccumulator {
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers,
                                          Callback callback, Deque<ProducerBatch> deque, long nowMs) {
+        // 获取最后一个 batch
         ProducerBatch last = deque.peekLast();
         if (last != null) {
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, headers, callback, nowMs);
+            // 如果 batch 的空间不够了，那么就关闭这个 batch
             if (future == null)
                 // 将当前 batch 关闭
                 // 待确认：关闭后，sender 会将请求发送给 kafka broker，然后再将 batch 从 deque 中移除
                 last.closeForRecordAppends();
             else
+                // 添加到当前batch
                 return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false);
         }
         return null;
@@ -486,14 +506,19 @@ public final class RecordAccumulator {
                     if (leader == null) {
                         // This is a partition for which leader is not known, but messages are available to send.
                         // Note that entries are currently not removed from batches when deque is empty.
-                        // partition 的 leader 不存在
+                        // partition 的 leader 不存在，将这种 topic 标记下，后面需要更新元数据信息
                         unknownLeaderTopics.add(part.topic());
+
+                        // Muted 表示该 topic-partition 当前已经有消息待发送，但是还没有发送完成，所以暂时不发送
+                        //主要防止topic同分区下的消息乱序问题
                     } else if (!readyNodes.contains(leader) && !isMuted(part)) {
                         // batch 创建到现在的时间
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
+                        // 重试的消息，retryBackoffMs 表示重试间隔
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
-                        // batch 大小已经满了(或是已经被 close 了)
+                        // 如果该 topic-partition 的队列大于1，说明最早的 batch 一定是满足发送条件了
+                        // 如果 batch 大小已经满了(或是已经被 close 了)
                         boolean full = deque.size() > 1 || batch.isFull();
                         // 等待了约定的时间，也要提交
                         boolean expired = waitedTimeMs >= timeToWaitMs;
@@ -501,12 +526,13 @@ public final class RecordAccumulator {
                         boolean transactionCompleting = transactionManager != null && transactionManager.isCompleting();
                         boolean sendable = full
                             || expired
+                                // 当前空间已经被耗尽了
                             || exhausted
                             || closed
+                                // todo 这个待理解
                             || flushInProgress()
                             || transactionCompleting;
                         if (sendable && !backingOff) {
-                            // todo 这里为啥记录 leader 信息？？？
                             readyNodes.add(leader);
                         } else {
                             long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
@@ -585,6 +611,7 @@ public final class RecordAccumulator {
             TopicPartition tp = new TopicPartition(part.topic(), part.partition());
             this.drainIndex = (this.drainIndex + 1) % parts.size();
 
+            // 一个 partition 同时只有一个 batch 在被发送
             // Only proceed if the partition has no in-flight batches.
             if (isMuted(tp))
                 continue;
@@ -600,16 +627,22 @@ public final class RecordAccumulator {
                     continue;
 
                 // first != null
+                // 重试的消息，retryBackoffMs 表示重试间隔
                 boolean backoff = first.attempts() > 0 && first.waitedTimeMs(now) < retryBackoffMs;
                 // Only drain the batch if it is not during backoff period.
+                // 没有达到重试时间间隔
+                // todo 确认重试的 batch 放在队首还是队尾
                 if (backoff)
                     continue;
 
+                // 如果这次发送的数据大于 max.request.size，那么就不再发送更多的 batch 了
                 if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
                     // there is a rare case that a single batch size is larger than the request size due to
                     // compression; in this case we will still eventually send this batch in a single request
                     break;
                 } else {
+                    // 如果不是事务逻辑，直接返回 false
+                    // todo 事务逻辑待理解
                     if (shouldStopDrainBatchesForPartition(first, tp))
                         break;
 
@@ -640,8 +673,10 @@ public final class RecordAccumulator {
 
                         transactionManager.addInFlightBatch(batch);
                     }
+                    // 将 batch 置为 close
                     batch.close();
                     size += batch.records().sizeInBytes();
+                    // 并添加到 ready，准备发送
                     ready.add(batch);
 
                     batch.drained(now);
@@ -660,6 +695,12 @@ public final class RecordAccumulator {
      * @param maxSize The maximum number of bytes to drain
      * @param now The current unix time in milliseconds
      * @return A list of {@link ProducerBatch} for each node specified with total size less than the requested maxSize.
+     */
+    /**
+     * 是用来遍历可发送请求的 node，然后再遍历在这个 node 上所有 tp，如果 tp 对应的 deque 有数据，
+     * 将会被选择出来直到超过一个请求的最大长度（max.request.size）为止，
+     * 也就说说即使 RecordBatch 没有达到条件，但为了保证每个 request 尽快多地发送数据提高发送效率，
+     * 这个 RecordBatch 依然会被提前选出来并进行发送。
      */
     public Map<Integer, List<ProducerBatch>> drain(Cluster cluster, Set<Node> nodes, int maxSize, long now) {
         if (nodes.isEmpty())

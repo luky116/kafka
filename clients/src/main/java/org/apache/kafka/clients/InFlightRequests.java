@@ -100,6 +100,8 @@ final class InFlightRequests {
     public boolean canSendMore(String node) {
         Deque<NetworkClient.InFlightRequest> queue = requests.get(node);
         return queue == null || queue.isEmpty() ||
+                // 这里会判断，是否有 maxInFlightRequestsPerConnection 个请求未返回，如果是的话，则不能发送更多的请求
+                // 注意，是一个 node 不能发送更多的请求，而不是整个 client
                (queue.peekFirst().send.completed() && queue.size() < this.maxInFlightRequestsPerConnection);
     }
 

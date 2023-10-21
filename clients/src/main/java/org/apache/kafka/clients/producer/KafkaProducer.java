@@ -505,6 +505,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     + " should be equal to or larger than " + ProducerConfig.LINGER_MS_CONFIG
                     + " + " + ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             } else {
+                // 如果为手动设置 delivery.timeout.ms 参数，直接使用 linger.ms + request.timeout.ms
                 // override deliveryTimeoutMs default value to lingerMs + requestTimeoutMs for backward compatibility
                 deliveryTimeoutMs = lingerAndRequestTimeoutMs;
                 log.warn("{} should be equal to or larger than {} + {}. Setting it to {}.",
@@ -956,14 +957,22 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 transactionManager.failIfNotReadyForSend();
             }
             // 4. 向 accumulator 中追加数据
+            /**
+             * 1、如果最新的 batch 没有写满，直接写入
+             * 2、如果设置 abortOnNewBatch 为 true，返回一个空的 RecordAppendResult 对象
+             * 3、
+             */
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, true, nowMs);
 
-            // todo 待理解，为啥这里要这么做？？？？直接在上面加进去不行吗？
+            // 新的批次，需要重新分区
             if (result.abortForNewBatch) {
                 int prevPartition = partition;
                 partitioner.onNewBatch(record.topic(), cluster, prevPartition);
+                // 一个批次结束，重新分区后，重新获取 partition，这样保证分区数据均匀
                 partition = partition(record, serializedKey, serializedValue, cluster);
+                // If the partition for a record changes, abort the current batch
+                // todo 待理解这里是啥意思？？？？
                 tp = new TopicPartition(record.topic(), partition);
                 if (log.isTraceEnabled()) {
                     log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
@@ -981,6 +990,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // 5. 如果 batch 已经满了,唤醒 sender 线程发送数据
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
+                /**
+                 * 这里会触发下面的逻辑：
+                 * @see org.apache.kafka.clients.producer.internals.Sender#run()
+                 */
                 this.sender.wakeup();
             }
             return result.future;
@@ -1028,12 +1041,15 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     // 等待 metadata 的更新
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long nowMs, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already and reset expiry
+        // 尝试从缓存中获取 metadata
         Cluster cluster = metadata.fetch();
 
-        // 已经被标记为无效的 topic，抛出异常
+        // 已经被标记为无效的 topic（topic 的 partition 没有 leader），抛出异常
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
 
+        // 将top1c添加到netadatal的topics列表，并将过期时间重置为-1：如果top1cs列表中不存在当前topic,
+        // 则强制更新netadata并将requestversion加1，同时将1 astRefreshMsi设为O,将needUpdate设为true
         metadata.add(topic, nowMs);
 
         // 如果 topic 已经存在 meta 中,则返回该 topic 的 partition 数,否则返回 null
@@ -1044,6 +1060,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
             return new ClusterAndWaitTime(cluster, 0);
 
+        // 走到这里，说明 topic 的 metadata 不存在，需要更新，下面会等待更新完成
         // 记录每次重试剩余的时间
         long remainingWaitMs = maxWaitMs;
         long elapsed = 0;
@@ -1069,7 +1086,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
              */
             sender.wakeup();
             try {
-                // 通过比较当前的 updateVersion 与步骤 1 中获取的 updateVersion 来判断是否更新成功；
+                // 等待更新，知道 version 大于原来的 version 或是超时
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -1304,6 +1321,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         Integer partition = record.partition();
         return partition != null ?
                 partition :
+                // org.apache.kafka.clients.producer.internals.DefaultPartitioner
                 partitioner.partition(
                         record.topic(), record.key(), serializedKey, record.value(), serializedValue, cluster);
     }
