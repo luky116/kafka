@@ -32,6 +32,7 @@ import java.util.Optional;
  */
 public class ApiVersions {
 
+    // 每一个 broker 节点都对应一个 broker 节点
     private final Map<String, NodeApiVersions> nodeApiVersions = new HashMap<>();
     private byte maxUsableProduceMagic = RecordBatch.CURRENT_MAGIC_VALUE;
 

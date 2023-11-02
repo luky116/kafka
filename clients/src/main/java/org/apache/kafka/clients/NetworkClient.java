@@ -123,6 +123,7 @@ public class NetworkClient implements KafkaClient {
      */
     private final boolean discoverBrokerVersions;
 
+    // 保存了 broker 返回的 apiVersion 信息
     private final ApiVersions apiVersions;
 
     private final Map<String, ApiVersionsRequest.Builder> nodesNeedingApiVersionsFetch = new HashMap<>();
@@ -497,9 +498,10 @@ public class NetworkClient implements KafkaClient {
             NodeApiVersions versionInfo = apiVersions.get(nodeId);
             short version;
             // Note: if versionInfo is null, we have no server version information. This would be
-            // the case when sending the initial ApiVersionRequest which fetches the version
-            // information itself.  It is also the case when discoverBrokerVersions is set to false.
+            // the case when sending the initial ApiVersionRequest which fetches the version 初始化的时候发送 apiVersion 请求
+            // information itself.  It is also the case when discoverBrokerVersions is set to false. 如果和 broker 的连接断开了，也会重新发送 apiVersion 请求
             if (versionInfo == null) {
+                // 默认为 0
                 version = builder.latestAllowedVersion();
                 if (discoverBrokerVersions && log.isTraceEnabled())
                     log.trace("No version information found when sending {} with correlation id {} to node {}. " +
@@ -510,6 +512,7 @@ public class NetworkClient implements KafkaClient {
             }
             // The call to build may also throw UnsupportedVersionException, if there are essential
             // fields that cannot be represented in the chosen version.
+            // builder.build 这里会判断该 version 下是否支持该 request
             doSend(clientRequest, isInternalRequest, now, builder.build(version));
         } catch (UnsupportedVersionException unsupportedVersionException) {
             // If the version is not supported, skip sending the request over the wire.
@@ -781,7 +784,9 @@ public class NetworkClient implements KafkaClient {
                                       long now,
                                       ChannelState disconnectState) {
         connectionStates.disconnected(nodeId, now);
+        // 断开连接，会移除该 node 的 apiVersion 信息
         apiVersions.remove(nodeId);
+        // 如果关闭连接，则从里面移除对该 broker 的 apiVersion 请求
         nodesNeedingApiVersionsFetch.remove(nodeId);
         switch (disconnectState.state()) {
             case AUTHENTICATION_FAILED:

@@ -52,6 +52,14 @@ import scala.collection._
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
+
+/**
+ * 每个 broker 启动的时候，都会创建一个这种对象
+ */
+// brokerId：所在Broker的Id
+// interBrokerProtocolVersion：Broker端参数inter.broker.protocol.version值
+// config: 内部位移主题配置类
+// replicaManager: 副本管理器类``````
 class GroupMetadataManager(brokerId: Int,
                            interBrokerProtocolVersion: ApiVersion,
                            config: OffsetConfig,
@@ -59,22 +67,30 @@ class GroupMetadataManager(brokerId: Int,
                            time: Time,
                            metrics: Metrics) extends Logging with KafkaMetricsGroup {
 
+  // 压缩器类型。向位移主题写入消息时执行压缩操作
   private val compressionType: CompressionType = CompressionType.forId(config.offsetsTopicCompressionCodec.codec)
 
+  // 消费者组元数据容器，保存Broker管理的所有消费者组的数据
+  // 保存这个Broker上GroupCoordinator组件管理的所有消费者组元数据。
   private val groupMetadataCache = new Pool[String, GroupMetadata]
 
   /* lock protecting access to loading and owned partition sets */
   private val partitionLock = new ReentrantLock()
 
+  // 位移主题下正在执行加载操作的分区(注意，是 __consumer_offsets 主题下的分区)
+  // 会用来判断当前是否是 groupId 的协调者
+  // todo 待理解 laoding 的整体流程
   /* partitions of consumer groups that are being loaded, its lock should be always called BEFORE the group lock if needed */
   private val loadingPartitions: mutable.Set[Int] = mutable.Set()
 
+  // 位移主题下完成加载操作的分区
   /* partitions of consumer groups that are assigned, using the same loading partition lock */
   private val ownedPartitions: mutable.Set[Int] = mutable.Set()
 
   /* shutting down flag */
   private val shuttingDown = new AtomicBoolean(false)
 
+  // 位移主题总分区数
   /* number of partitions for the consumer metadata topic */
   @volatile private var groupMetadataTopicPartitionCount: Int = _
 
@@ -755,16 +771,21 @@ class GroupMetadataManager(brokerId: Int,
    * When this broker becomes a follower for an offsets topic partition clear out the cache for groups that belong to
    * that partition.
    *
+   * 如果一个 broker 成为一个 offsets topic 的 partition 的 follower，需要将属于该 partition 管理的 group 的缓存清除
+   *
    * @param offsetsPartition Groups belonging to this partition of the offsets topic will be deleted from the cache.
    */
   def removeGroupsForPartition(offsetsPartition: Int,
                                coordinatorEpoch: Option[Int],
                                onGroupUnloaded: GroupMetadata => Unit): Unit = {
+    // 位移主题分区
     val topicPartition = new TopicPartition(Topic.GROUP_METADATA_TOPIC_NAME, offsetsPartition)
     info(s"Scheduling unloading of offsets and group metadata from $topicPartition")
+    // 创建异步任务，移除组信息和位移信息
     scheduler.schedule(topicPartition.toString, () => removeGroupsAndOffsets(topicPartition, coordinatorEpoch, onGroupUnloaded))
   }
 
+  // 内部方法，用于移除组信息和位移信息
   private [group] def removeGroupsAndOffsets(topicPartition: TopicPartition,
                                              coordinatorEpoch: Option[Int],
                                              onGroupUnloaded: GroupMetadata => Unit): Unit = {
@@ -778,15 +799,27 @@ class GroupMetadataManager(brokerId: Int,
       inLock(partitionLock) {
         // we need to guard the group removal in cache in the loading partition lock
         // to prevent coordinator's check-and-get-group race condition
+        // 移除ownedPartitions中特定位移主题分区记录
         ownedPartitions.remove(offsetsPartition)
         loadingPartitions.remove(offsetsPartition)
 
+        // 遍历所有消费者组信息
         for (group <- groupMetadataCache.values) {
+          // 如果该组信息保存在特定位移主题分区中
+          // todo 疑问：一个 broker 是多个 consumer_offsets 的 leader，这里要一次性全部移除吗？？？
           if (partitionFor(group.groupId) == offsetsPartition) {
+            // 执行组卸载逻辑
+            // 这个方法的逻辑是上层组件GroupCoordinator传过来的。
+            // 它主要做两件事情：将消费者组状态变更到Dead状态；封装异常表示Coordinator已发生变更，然后调用回调函数返回。
             onGroupUnloaded(group)
+            // 关键步骤！将组信息从groupMetadataCache中移除
+            // 目的是彻底清除掉该组的“痕迹”。
             groupMetadataCache.remove(group.groupId, group)
+            // 把消费者组从producer对应的组集合中移除这里的producer，是给Kafka事务用的。
             removeGroupFromAllProducers(group.groupId)
+            // 更新已移除组计数器
             numGroupsRemoved += 1
+            // 更新已移除位移值计数器
             numOffsetsRemoved += group.numOffsets
           }
         }

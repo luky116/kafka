@@ -1383,12 +1383,14 @@ public abstract class AbstractCoordinator implements Closeable {
                             } else {
                                 lookupCoordinator();
                             }
+                            //将上次成功获取响应的时间与当前时间做对比，超过时间则认为协调者不健康，相协调者标记为unknown
                         } else if (heartbeat.sessionTimeoutExpired(now)) {
                             // the session timeout has expired without seeing a successful heartbeat, so we should
                             // probably make sure the coordinator is still healthy.
                             markCoordinatorUnknown("session timed out without receiving a "
                                     + "heartbeat response");
                         } else if (heartbeat.pollTimeoutExpired(now)) {
+                            //在两次poll的时间超过设置值，则向协调者发送离开组的请求。
                             // the poll timeout has expired, which means that the foreground thread has stalled
                             // in between calls to poll().
                             String leaveReason = "consumer poll timeout has expired. This means the time between subsequent calls to poll() " +

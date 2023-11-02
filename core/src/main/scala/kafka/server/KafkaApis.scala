@@ -1480,6 +1480,7 @@ class KafkaApis(val requestChannel: RequestChannel, // 请求通道
     }
   }
 
+  // 这里是处理 client 发送 joinGroup 请求的入口方法
   def handleJoinGroupRequest(request: RequestChannel.Request): Unit = {
     val joinGroupRequest = request.body[JoinGroupRequest]
 
@@ -1543,6 +1544,8 @@ class KafkaApis(val requestChannel: RequestChannel, // 请求通道
     }
   }
 
+  // 组同步方案，这是 reblance 的流程
+  // 处理消费者组成员发送的SyncGroupRequest请求
   def handleSyncGroupRequest(request: RequestChannel.Request): Unit = {
     val syncGroupRequest = request.body[SyncGroupRequest]
 

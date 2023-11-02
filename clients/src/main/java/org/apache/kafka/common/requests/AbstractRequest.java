@@ -79,6 +79,7 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
     private final short version;
     private final ApiKeys apiKey;
 
+    // 确认这个 version 是否支持这个 request
     public AbstractRequest(ApiKeys apiKey, short version) {
         if (!apiKey.isVersionSupported(version))
             throw new UnsupportedVersionException("The " + apiKey + " protocol does not support version " + version);
