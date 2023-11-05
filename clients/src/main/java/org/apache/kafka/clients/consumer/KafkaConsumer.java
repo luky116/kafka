@@ -768,6 +768,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG),
                     heartbeatIntervalMs); //Will avoid blocking an extended period of time to prevent heartbeat thread starvation
 
+            // 默认的分区分配策略是 RangeAssignor
             this.assignors = getAssignorInstances(config.getList(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG),
                     config.originals(Collections.singletonMap(ConsumerConfig.CLIENT_ID_CONFIG, clientId)));
 
@@ -946,24 +947,32 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     @Override
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
+        // 检查当前 KafkaConsumer 是否被多线程使用，是的话直接报错
         acquireAndEnsureOpen();
         try {
+            // 如果 group_id 未设置直接报错
             maybeThrowInvalidGroupIdException();
+            // topics 为 null 直接报错
             if (topics == null)
                 throw new IllegalArgumentException("Topic collection to subscribe to cannot be null");
+            // topics 为空，表示取消订阅
             if (topics.isEmpty()) {
                 // treat subscribing to empty topic list as the same as unsubscribing
+                // 清空正在处理的请求
                 this.unsubscribe();
             } else {
                 for (String topic : topics) {
+                    // topic 不能为空
                     if (topic == null || topic.trim().isEmpty())
                         throw new IllegalArgumentException("Topic collection to subscribe to cannot contain null or empty topic");
                 }
 
+                // 分区算法不能为空
                 throwIfNoAssignorsConfigured();
                 fetcher.clearBufferedDataForUnassignedTopics(topics);
                 log.info("Subscribed to topic(s): {}", Utils.join(topics, ", "));
                 if (this.subscriptions.subscribe(new HashSet<>(topics), listener))
+                    // 设置 needPartialUpdate 为 true，异步更新 metadata
                     metadata.requestUpdateForNewTopics();
             }
         } finally {
@@ -1023,6 +1032,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             throw new IllegalArgumentException("Topic pattern to subscribe to cannot be " + (pattern == null ?
                     "null" : "empty"));
 
+        // 确保这个 consumer 只被一个线程占用，因为他不是线程安全类型的
         acquireAndEnsureOpen();
         try {
             throwIfNoAssignorsConfigured();
@@ -1063,8 +1073,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors (e.g. rebalance callback errors)
      */
     public void unsubscribe() {
+        // 检查是否被多线程使用，是的话直接报错
         acquireAndEnsureOpen();
         try {
+            // 清空待处理的请求
             fetcher.clearBufferedDataForUnassignedPartitions(Collections.emptySet());
             if (this.coordinator != null) {
                 this.coordinator.onLeavePrepare();
@@ -1214,26 +1226,40 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws KafkaException if the rebalance callback throws exception
      */
     private ConsumerRecords<K, V> poll(final Timer timer, final boolean includeMetadataInTimeout) {
+        // 检查是否被多线程使用，是的话直接报错
         acquireAndEnsureOpen();
         try {
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
 
+            // 没有订阅任何 topic，或是没有任何分区分配给他
             if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) {
                 throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
             }
 
+            // 假如一直没拉取到消息，则会持续拉取直到超过了设置的时间
+            // todo 待确认区分 includeMetadataInTimeout 的含义
             do {
+                // 如果 client 已经被 close，则不能再次被唤醒使用
                 client.maybeTriggerWakeup();
 
                 if (includeMetadataInTimeout) {
                     // try to update assignment metadata BUT do not need to block on the timer for join group
+                    // 消费者 partition 分配流程
                     updateAssignmentMetadataIfNeeded(timer, false);
                 } else {
+                    // ：更新相关元数据，为真正向 broker 发送消息拉取请求做好准备，该方法将在下面详细介绍，现在先简单介绍其核心实现点：
+                    //• 如有必要，先向 broker 端拉取最新的订阅信息(包含消费组内的在线的消费客户端)。
+                    //• 执行已完成(异步提交)的 offset 提交请求的回调函数。
+                    //• 维护与 broker 端的心跳请求，确保不会被“踢出”消费组。
+                    //• 更新元信息。
+                    //• 如果是自动提交消费偏移量，则自动提交偏移量。
+                    //• 更新各个分区下次待拉取的偏移量。
                     while (!updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE), true)) {
                         log.warn("Still waiting for metadata");
                     }
                 }
 
+                // 向服务器发起拉取消息请求，并获得消息
                 final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollForFetches(timer);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -1273,12 +1299,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 Math.min(coordinator.timeToNextPoll(timer.currentTimeMs()), timer.remainingMs());
 
         // if data is available already, return it immediately
+        // 如果 fetcher 缓存中有数据，直接返回数据
         final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = fetcher.fetchedRecords();
         if (!records.isEmpty()) {
             return records;
         }
 
         // send any new fetches (won't resend pending fetches)
+        // 生成拉取数据的异步请求
         fetcher.sendFetches();
 
         // We do not want to be stuck blocking in poll if we are missing some positions
@@ -1293,6 +1321,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         log.trace("Polling for fetches with timeout {}", pollTimeout);
 
         Timer pollTimer = time.timer(pollTimeout);
+        // 发起请求，并将底层响应通过回调处理器传递到上层
         client.poll(pollTimer, () -> {
             // since a fetch might be completed by the background thread, we need this poll condition
             // to ensure that we do not block unnecessarily in poll()
@@ -1300,6 +1329,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         });
         timer.update(pollTimer.currentTimeMs());
 
+        // 获取队列缓存的消息记录，返回消息记录
         return fetcher.fetchedRecords();
     }
 
@@ -2425,6 +2455,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * Acquire the light lock and ensure that the consumer hasn't been closed.
      * @throws IllegalStateException If the consumer has been closed
      */
+    // 检查是否被多线程使用，是的话直接报错
     private void acquireAndEnsureOpen() {
         acquire();
         if (this.closed) {

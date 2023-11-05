@@ -508,6 +508,7 @@ public class ConsumerNetworkClient implements Closeable {
     }
 
     public void maybeTriggerWakeup() {
+        // 如果已经被 close 了，就不用再 wakeup 了
         if (!wakeupDisabled.get() && wakeup.get()) {
             log.debug("Raising WakeupException in response to user wakeup");
             wakeup.set(false);
