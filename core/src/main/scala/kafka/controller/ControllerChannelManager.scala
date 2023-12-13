@@ -124,6 +124,7 @@ class ControllerChannelManager(controllerContext: ControllerContext,
     // 为该Broker构造请求阻塞队列
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug(s"Controller ${config.brokerId} trying to connect to broker ${broker.id}")
+    // contro-plane 的通信协议
     val controllerToBrokerListenerName = config.controlPlaneListenerName.getOrElse(config.interBrokerListenerName)
     val controllerToBrokerSecurityProtocol = config.controlPlaneSecurityProtocol.getOrElse(config.interBrokerSecurityProtocol)
     // 获取待连接Broker节点对象信息
@@ -181,21 +182,26 @@ class ControllerChannelManager(controllerContext: ControllerContext,
       )
       (networkClient, reconfigurableChannelBuilder)
     }
+    // 为这个RequestSendThread线程设置线程名称
     val threadName = threadNamePrefix match {
       case None => s"Controller-${config.brokerId}-to-broker-${broker.id}-send-thread"
       case Some(name) => s"$name:Controller-${config.brokerId}-to-broker-${broker.id}-send-thread"
     }
 
+    // 构造请求处理速率监控指标
     val requestRateAndQueueTimeMetrics = newTimer(
       RequestRateAndQueueTimeMetricName, TimeUnit.MILLISECONDS, TimeUnit.SECONDS, brokerMetricTags(broker.id)
     )
 
+    // 创建RequestSendThread实例
     val requestThread = new RequestSendThread(config.brokerId, controllerContext, messageQueue, networkClient,
       brokerNode, config, time, requestRateAndQueueTimeMetrics, stateChangeLogger, threadName)
     requestThread.setDaemon(false)
 
     val queueSizeGauge = newGauge(QueueSizeMetricName, () => messageQueue.size, brokerMetricTags(broker.id))
 
+    // 创建该Broker专属的ControllerBrokerStateInfo实例
+    // 并将其加入到brokerStateInfo统一管理
     brokerStateInfo.put(broker.id, ControllerBrokerStateInfo(networkClient, brokerNode, messageQueue,
       requestThread, queueSizeGauge, requestRateAndQueueTimeMetrics, reconfigurableChannelBuilder))
   }

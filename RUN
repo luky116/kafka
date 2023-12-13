@@ -6,4 +6,4 @@ bin/zookeeper-server-start.sh /Users/sanyue/code/qihoo/Qkafka/config/zookeeper.p
 export KAFKA_OPTS=-Djava.security.auth.login.config=/Users/sanyue/code/qihoo/Qkafka/config/kafka_server_jaas.conf
 bin/kafka-server-start.sh /Users/sanyue/code/qihoo/Qkafka/config/server.properties
 
-https://www.cnblogs.com/iamsach/p/9234624.html
+#https://www.cnblogs.com/iamsach/p/9234624.html

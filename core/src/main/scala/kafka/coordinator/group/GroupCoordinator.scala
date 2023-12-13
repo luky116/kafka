@@ -168,7 +168,7 @@ class GroupCoordinator(val brokerId: Int,
                      ): Unit = {
     // 1、协调者是否已经启动
     // 2、groupId 是否不为空
-    // 3、consumer__offsets 分区是否正在加载
+    // 3、__consumer_offsets 分区是否正在加载
     // 4、当前协调者是否管理这个 groupId
     validateGroupStatus(groupId, ApiKeys.JOIN_GROUP).foreach { error =>
       responseCallback(JoinGroupResult(memberId, error))

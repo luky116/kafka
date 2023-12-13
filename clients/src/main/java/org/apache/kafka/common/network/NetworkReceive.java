@@ -89,6 +89,7 @@ public class NetworkReceive implements Receive {
         return !size.hasRemaining() && buffer != null && !buffer.hasRemaining();
     }
 
+    // todo 待理解这里的最大大小
     public long readFrom(ScatteringByteChannel channel) throws IOException {
         int read = 0;
         if (size.hasRemaining()) {
@@ -101,6 +102,7 @@ public class NetworkReceive implements Receive {
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
+                // todo 待理解
                 if (maxSize != UNLIMITED && receiveSize > maxSize)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + " larger than " + maxSize + ")");
                 requestedBufferSize = receiveSize; //may be 0 for some payloads (SASL)

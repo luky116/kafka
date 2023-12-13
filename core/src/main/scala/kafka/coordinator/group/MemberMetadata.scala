@@ -74,7 +74,7 @@ private[group] class MemberMetadata(var memberId: String,
                                     val protocolType: String, // 对消费者组而言，是"consumer"，其他比如 connect
                                     // 成员配置的多套分区分配策略
                                     var supportedProtocols: List[(String, Array[Byte])],
-                                    // 分区分配方案
+                                    // 保存分配给该成员的的分区分配方案
                                     var assignment: Array[Byte] = Array.empty[Byte]) {
 
   // 表示组成员是否正在等待加入组

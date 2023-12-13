@@ -1723,10 +1723,14 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
       Set.empty[String]
   }
 
+  // inter.broker.listener 的 name 和 协议
   def interBrokerListenerName = getInterBrokerListenerNameAndSecurityProtocol._1
   def interBrokerSecurityProtocol = getInterBrokerListenerNameAndSecurityProtocol._2
+
+  // control.plane.listener 的 name 和 协议
   def controlPlaneListenerName = getControlPlaneListenerNameAndSecurityProtocol.map { case (listenerName, _) => listenerName }
   def controlPlaneSecurityProtocol = getControlPlaneListenerNameAndSecurityProtocol.map { case (_, securityProtocol) => securityProtocol }
+
   def saslMechanismInterBrokerProtocol = getString(KafkaConfig.SaslMechanismInterBrokerProtocolProp)
   val saslInterBrokerHandshakeRequestEnable = interBrokerProtocolVersion >= KAFKA_0_10_0_IV1
 
@@ -1827,6 +1831,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
     }
   }
 
+  // 从 listeners 中把 controller 的 listener 去掉，就是data-plane 的 listener 了
   def dataPlaneListeners: Seq[EndPoint] = {
     listeners.filterNot { listener =>
       val name = listener.listenerName.value()
@@ -1839,6 +1844,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   // If they didn't but did define advertised host or port, we'll use those and fill in the missing value from regular host / port or defaults
   // If none of these are defined, we'll use the listeners
   def advertisedListeners: Seq[EndPoint] = {
+    // advertised.listeners
     val advertisedListenersProp = getString(KafkaConfig.AdvertisedListenersProp)
     if (advertisedListenersProp != null)
       CoreUtils.listenerListToEndPoints(advertisedListenersProp, listenerSecurityProtocolMap, requireDistinctPorts=false)
@@ -1848,8 +1854,11 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
       listeners.filterNot(l => controllerListenerNames.contains(l.listenerName.value()))
   }
 
+  // inter.broker.listener.name
   private def getInterBrokerListenerNameAndSecurityProtocol: (ListenerName, SecurityProtocol) = {
     Option(getString(KafkaConfig.InterBrokerListenerNameProp)) match {
+      // "inter.broker.listener.name"
+      // "security.inter.broker.protocol"
       case Some(_) if originals.containsKey(KafkaConfig.InterBrokerSecurityProtocolProp) =>
         throw new ConfigException(s"Only one of ${KafkaConfig.InterBrokerListenerNameProp} and " +
           s"${KafkaConfig.InterBrokerSecurityProtocolProp} should be set.")
@@ -1888,6 +1897,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   }
 
   def listenerSecurityProtocolMap: Map[ListenerName, SecurityProtocol] = {
+    // ListenerSecurityProtocolMapProp：listener.security.protocol.map
     getMap(KafkaConfig.ListenerSecurityProtocolMapProp, getString(KafkaConfig.ListenerSecurityProtocolMapProp))
       .map { case (listenerName, protocolName) =>
       ListenerName.normalised(listenerName) -> getSecurityProtocol(protocolName, KafkaConfig.ListenerSecurityProtocolMapProp)

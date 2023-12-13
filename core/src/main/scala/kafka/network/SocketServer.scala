@@ -275,6 +275,7 @@ class SocketServer(val config: KafkaConfig,
 
   private def endpoints = config.listeners.map(l => l.listenerName -> l).toMap
 
+  // 创建 DataPlane 监听器
   private def createDataPlaneAcceptorsAndProcessors(
                                                      dataProcessorsPerListener: Int, endpoints: Seq[EndPoint]): Unit = {
     // 遍历监听器集合

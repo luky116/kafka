@@ -601,24 +601,44 @@ class ReplicaManager(val config: KafkaConfig,
    * Noted that all pending delayed check operations are stored in a queue. All callers to ReplicaManager.appendRecords()
    * are expected to call ActionQueue.tryCompleteActions for all affected partitions, without holding any conflicting
    * locks.
+   *
+   * 将消息附加到分区的领导副本并等待它们复制到其他副本 如果回调函数本身已经在某个对象上同步，则在超时或满足所需的确认时将触发回调函数，然后传递此对象以避免死锁
+   * 注意到所有挂起的延迟检查操作都存储在队列中所有副本管理器附加记录的调用者都应该调用操作队列尝试对所有受影响的分区执行完整操作，而不持有任何冲突的锁
    */
-  def appendRecords(timeout: Long,
-                    requiredAcks: Short,
-                    internalTopicsAllowed: Boolean,
-                    origin: AppendOrigin,
-                    entriesPerPartition: Map[TopicPartition, MemoryRecords],
-                    responseCallback: Map[TopicPartition, PartitionResponse] => Unit,
-                    delayedProduceLock: Option[Lock] = None,
-                    recordConversionStatsCallback: Map[TopicPartition, RecordConversionStats] => Unit = _ => ()): Unit = {
+
+  /**
+   * 参考：https://blog.csdn.net/lianggx3/article/details/108901936
+   *
+   * 副本写入，是指向副本底层日志写入消息。在 ReplicaManager 类中，实现副本写入的方法叫 appendRecords。放眼整个 Kafka 源码世界，需要副本写入的场景有 4 个。
+   *
+   * 生产者向 Leader 副本写入消息
+   * Follower 副本拉取消息后写入副本
+   * 消费者组写入组信息
+   * 事务管理器写入事务信息（包括事务标记、事务元数据等）
+   */
+  def appendRecords(timeout: Long, // 请求处理超时时间
+                    requiredAcks: Short, // 请求acks设置
+                    internalTopicsAllowed: Boolean, // 是否允许写入内部主题
+                    origin: AppendOrigin,  // 写入方来源：副本、coordinator、客户端
+                    entriesPerPartition: Map[TopicPartition, MemoryRecords], // 待写入消息
+                    responseCallback: Map[TopicPartition, PartitionResponse] => Unit, // 回调逻辑
+                    delayedProduceLock: Option[Lock] = None, // 专门用来保护消费者组操作线程安全的锁对象，在其他场景中用不到。
+                    recordConversionStatsCallback: Map[TopicPartition, RecordConversionStats] => Unit = _ => () // 消息格式转换操作的回调统计逻辑，主要用于统计消息格式转换操作过程中的一些数据指标
+                   ): Unit = {
+    // requiredAcks合法取值是-1，0，1，否则视为非法
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = time.milliseconds
+      // 调用appendToLocalLog方法写入消息集合到本地日志
+      // 【核心问题】
       val localProduceResults = appendToLocalLog(internalTopicsAllowed = internalTopicsAllowed,
         origin, entriesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(time.milliseconds - sTime))
 
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition -> ProducePartitionStatus(
+          // 设置下一条待写入消息的位移值
           result.info.lastOffset + 1, // required offset
+          // 构建PartitionResponse封装写入结果
           new PartitionResponse(
             result.error,
             result.info.firstOffset.map(_.messageOffset).getOrElse(-1),
@@ -650,8 +670,9 @@ class ReplicaManager(val config: KafkaConfig,
           }
       }
 
+      // 尝试更新消息格式转换的指标数据
       recordConversionStatsCallback(localProduceResults.map { case (k, v) => k -> v.info.recordConversionStats })
-
+      // 需要等待其他副本完成写入
       if (delayedProduceRequestRequired(requiredAcks, entriesPerPartition, localProduceResults)) {
         // create delayed produce operation
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
@@ -663,14 +684,18 @@ class ReplicaManager(val config: KafkaConfig,
         // try to complete the request immediately, otherwise put it into the purgatory
         // this is because while the delayed produce operation is being created, new
         // requests may arrive and hence make this operation completable.
+        // 如果暂时无法完成，则将对象放入到相应的Purgatory中等待后续处理
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
         // we can respond immediately
+        // 无需等待其他副本写入完成，可以立即发送Response
         val produceResponseStatus = produceStatus.map { case (k, status) => k -> status.responseStatus }
+        // 调用回调逻辑然后返回即可
         responseCallback(produceResponseStatus)
       }
     } else {
+      // 如果requiredAcks值不合法
       // If required.acks is outside accepted range, something is wrong with the client
       // Just return an error and don't handle the request at all
       val responseStatus = entriesPerPartition.map { case (topicPartition, _) =>
@@ -681,6 +706,7 @@ class ReplicaManager(val config: KafkaConfig,
           LogAppendInfo.UnknownLogAppendInfo.logStartOffset
         )
       }
+      // 构造INVALID_REQUIRED_ACKS异常并封装进回调函数调用中
       responseCallback(responseStatus)
     }
   }

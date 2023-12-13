@@ -52,6 +52,26 @@ object Broker {
  */
 case class Broker(id: Int, endPoints: Seq[EndPoint], rack: Option[String], features: Features[SupportedVersionRange]) {
 
+  /*
+  {
+    "features": {},
+    "listener_security_protocol_map": {
+      "CONTROLLER": "SASL_PLAINTEXT",
+      "INTERNAL": "SASL_PLAINTEXT"
+    },
+    "endpoints":[
+      "CONTROLLER://kafka28-1.add.lycc.qihoo.net:9032",
+      "INTERNAL://10.216.30.55:29001"
+    ],
+    "jmx_port": 9192,
+    "port": -1,
+    "host": null,
+    "version": 5,
+    "timestamp": "1700127792144"
+  }
+  */
+
+  // 注意，endPoints 包含了 broker 的 inter 和 control 两个端口
   private val endPointsMap = endPoints.map { endPoint =>
     endPoint.listenerName -> endPoint
   }.toMap

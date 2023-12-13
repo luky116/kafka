@@ -129,7 +129,8 @@ private object GroupMetadata extends Logging {
   def loadGroup(groupId: String,
                 // 定义了消费者组的状态空间。
                 // 当前有5个状态，分别是Empty、PreparingRebalance、CompletingRebalance、Stable和Dead。
-                // 其中，Empty表示当前无成员的消费者组；PreparingRebalance表示正在执行加入组操作的消费者组；
+                // 其中，Empty表示当前无成员的消费者组；
+                // PreparingRebalance表示正在执行加入组操作的消费者组；
                 // CompletingRebalance表示等待Leader成员制定分配方案的消费者组；
                 // Stable表示已完成Rebalance操作可正常工作的消费者组；
                 // Dead表示当前无成员且元数据信息被删除的消费者组。
@@ -216,15 +217,17 @@ private[group] class GroupMetadata(val groupId: String,  // 组ID
 
   // 组状态
   private var state: GroupState = initialState
-  // 记录状态最近一次变更的时间戳
+  // - 记录最近一次状态变更的时间戳，用于确定位移主题中的过期消息。
+  // 位移主题中的消息也要遵循Kafka的留存策略，所有当前时间与该字段的差值超过了留存阈值的消息都被视为“已过期”（Expired）。
   var currentStateTimestamp: Option[Long] = Some(time.milliseconds())
   var protocolType: Option[String] = None
   var protocolName: Option[String] = None
+  // 消费组Generation号。Generation等同于消费者组执行过Rebalance操作的次数，每次执行Rebalance时，Generation数都要加1。
   var generationId = 0
   // 记录消费者组的Leader成员，可能不存在
   private var leaderId: Option[String] = None
 
-  // 成员元数据列表信息
+  // 成员元数据列表信息，memberID 为 key
   private val members = new mutable.HashMap[String, MemberMetadata]
   // Static membership mapping [key: group.instance.id, value: member.id]
   // 静态成员Id列表
@@ -233,7 +236,9 @@ private[group] class GroupMetadata(val groupId: String,  // 组ID
   private var numMembersAwaitingJoin = 0
   // 分区分配策略支持票数
   private val supportedProtocols = new mutable.HashMap[String, Integer]().withDefaultValue(0)
-  // 保存消费者组订阅分区的提交位移值
+  // 保存按照主题分区分组的位移主题消息位移值的HashMap。
+  // Key是主题分区，Value是前面讲过的CommitRecordMetadataAndOffset类型。
+  // 当消费者组成员向Kafka提交位移时，源码都会向这个字段插入对应的记录。
   private val offsets = new mutable.HashMap[TopicPartition, CommitRecordMetadataAndOffset]
   private val pendingOffsetCommits = new mutable.HashMap[TopicPartition, OffsetAndMetadata]
   private val pendingTransactionalOffsetCommits = new mutable.HashMap[Long, mutable.Map[TopicPartition, CommitRecordMetadataAndOffset]]()
@@ -258,6 +263,8 @@ private[group] class GroupMetadata(val groupId: String,  // 组ID
 
   def isLeader(memberId: String): Boolean = leaderId.contains(memberId)
   def leaderOrNull: String = leaderId.orNull
+  // 记录最近一次状态变更的时间戳，用于确定位移主题中的过期消息。
+  // 位移主题中的消息也要遵循Kafka的留存策略，所有当前时间与该字段的差值超过了留存阈值的消息都被视为“已过期”（Expired）。
   def currentStateTimestampOrDefault: Long = currentStateTimestamp.getOrElse(-1)
 
   def isConsumerGroup: Boolean = protocolType.contains(ConsumerProtocol.PROTOCOL_TYPE)

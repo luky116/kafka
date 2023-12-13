@@ -36,28 +36,35 @@ object ControllerEventManager {
 }
 
 trait ControllerEventProcessor {
+  // 接收一个Controller事件，并进行处理。
   def process(event: ControllerEvent): Unit
+  // 接收一个Controller事件，并抢占队列之前的事件进行优先处理。
   def preempt(event: ControllerEvent): Unit
 }
 
+// 每个QueuedEvent定义了两个字段
+// event: ControllerEvent类，表示Controller事件
+// enqueueTimeMs：表示Controller事件被放入到事件队列的时间戳
 class QueuedEvent(val event: ControllerEvent,
                   val enqueueTimeMs: Long) {
+  // 标识事件是否开始被处理
   val processingStarted = new CountDownLatch(1)
+  // 标识事件是否被处理过
   val spent = new AtomicBoolean(false)
-
+  // 处理事件
   def process(processor: ControllerEventProcessor): Unit = {
     if (spent.getAndSet(true))
       return
     processingStarted.countDown()
     processor.process(event)
   }
-
+  // 抢占式处理事件
   def preempt(processor: ControllerEventProcessor): Unit = {
     if (spent.getAndSet(true))
       return
     processor.preempt(event)
   }
-
+  // 阻塞等待事件被处理完成
   def awaitProcessing(): Unit = {
     processingStarted.await()
   }

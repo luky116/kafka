@@ -201,6 +201,7 @@ public final class MessageUtil {
         int messageSize = message.size(cache, version);
         ByteBufferAccessor bytes = new ByteBufferAccessor(ByteBuffer.allocate(messageSize + 2));
         bytes.writeShort(version);
+        // 存储 version 和 value 的值
         message.write(bytes, cache, version);
         bytes.flip();
         return bytes.buffer();

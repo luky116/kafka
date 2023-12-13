@@ -589,8 +589,8 @@ class KafkaController(val config: KafkaConfig,
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
     if (deadBrokersThatWereShuttingDown.nonEmpty)
       info(s"Removed ${deadBrokersThatWereShuttingDown.mkString(",")} from list of shutting down brokers.")
-    // 执行副本清扫工作
     val allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokers.toSet)
+    // 执行副本清理工作
     onReplicasBecomeOffline(allReplicasOnDeadBrokers)
     // 取消这些Broker上注册的ZooKeeper监听器
     unregisterBrokerModificationsHandler(deadBrokers)
@@ -603,7 +603,7 @@ class KafkaController(val config: KafkaConfig,
 
   /**
     * This method marks the given replicas as offline. It does the following -
-    * 1. Marks the given partitions as offline
+    * 1. Marks the given partitions as offline 标记partition为离线状态
     * 2. Triggers the OnlinePartition state change for all new/offline partitions
     * 3. Invokes the OfflineReplica state change on the input list of newly offline replicas
     * 4. If no partitions are affected then send UpdateMetadataRequest to live or shutting down brokers
