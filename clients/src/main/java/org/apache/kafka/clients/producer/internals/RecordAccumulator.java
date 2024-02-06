@@ -636,6 +636,7 @@ public final class RecordAccumulator {
                     continue;
 
                 // 如果这次发送的数据大于 max.request.size，那么就不再发送更多的 batch 了
+                // 注意，这就是说，多个 batch 可以一起发送，但是一个 batch 不能被拆分成多个请求发送
                 if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
                     // there is a rare case that a single batch size is larger than the request size due to
                     // compression; in this case we will still eventually send this batch in a single request

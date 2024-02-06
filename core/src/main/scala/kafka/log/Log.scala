@@ -79,12 +79,13 @@ object LeaderHwChange {
 }
 
 /**
+ * 保存待写入消息的元数据信息
  * Struct to hold various quantities we compute about each message set before appending to the log
  *
  * @param firstOffset The first offset in the message set unless the message format is less than V2 and we are appending
  *                    to the follower. If the message is a duplicate message the segment base offset and relative position
  *                    in segment will be unknown.
- * @param lastOffset The last offset in the message set
+ * @param lastOffset The last offset in the message set 消息的最大位移
  * @param lastLeaderEpoch The partition leader epoch corresponding to the last offset, if available.
  * @param maxTimestamp The maximum timestamp of the message set.
  * @param offsetOfMaxTimestamp The offset of the message with the maximum timestamp.
@@ -250,9 +251,9 @@ case object SnapshotGenerated extends LogStartOffsetIncrementReason {
  *                                  2.8, partition.metadata will be deleted to avoid ID conflicts upon re-upgrade.
  */
 @threadsafe
-class Log(@volatile private var _dir: File,
+class Log(@volatile private var _dir: File, // 主题分区路径
           @volatile var config: LogConfig,
-          @volatile var logStartOffset: Long,
+          @volatile var logStartOffset: Long, // 日志的当前最早位移
           @volatile var recoveryPoint: Long,
           scheduler: Scheduler,
           brokerTopicStats: BrokerTopicStats,
@@ -309,6 +310,7 @@ class Log(@volatile private var _dir: File,
   @volatile private var highWatermarkMetadata: LogOffsetMetadata = LogOffsetMetadata(logStartOffset)
 
   /* the actual segments of the log */
+  // 日志以下面的所有 Segment 日志段记录
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
 
   // Visible for testing

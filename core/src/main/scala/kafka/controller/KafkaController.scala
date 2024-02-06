@@ -505,14 +505,21 @@ class KafkaController(val config: KafkaConfig,
   /**
    * This callback is invoked by the replica state machine's broker change listener, with the list of newly started
    * brokers as input. It does the following -
+   * 1. 给其他存活的 broker 发送更新元数据请求，让它们知道新 broker 的存在
    * 1. Sends update metadata request to all live and shutting down brokers
+   * 2. 根据现在的 broker 状态，将所有离线和新的partition状态转换为OnlinePartition
    * 2. Triggers the OnlinePartition state change for all new/offline partitions
+   * 3. 检查是否有重新分配的副本分配给任何新启动的 broker。如果有，它会为每个topic/partition执行重新分配逻辑。
    * 3. It checks whether there are reassigned replicas assigned to any newly started brokers. If
    *    so, it performs the reassignment logic for each topic/partition.
    *
+   * 注意，此时我们无需更新所有的topic/partition的leader和ISR缓存，有两个原因：
    * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point for two reasons:
+   * 1. 只需更新处于离线或是新建状态的分区的leader和ISR
    * 1. The partition state machine, when triggering online state change, will refresh leader and ISR for only those
    *    partitions currently new or offline (rather than every partition this controller is aware of)
+   * 2. 即使我们刷新了缓存，也不能保证当leader和ISR请求到达每个broker时它仍然有效。broker检查leader epoch来确定请求的有效性。
+   * TODO 这个没太理解这是啥意思？
    * 2. Even if we do refresh the cache, there is no guarantee that by the time the leader and ISR request reaches
    *    every broker that it is still valid.  Brokers check the leader epoch to determine validity of the request.
    */
@@ -1563,17 +1570,27 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def processBrokerChange(): Unit = {
+    // isActive 说明该 broker 是 controller
     if (!isActive) return
+    // 获取zk中当前所有broker的信息
     val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
+    //  Map[Int, Long] 类型，key为brokerId，value为epoch
     val curBrokerIdAndEpochs = curBrokerAndEpochs map { case (broker, epoch) => (broker.id, epoch) }
+    // zk 中所有的 brokerID
     val curBrokerIds = curBrokerIdAndEpochs.keySet
+    // controller 内存缓存的 broker 信息
     val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
+    // 将缓存的broker信息与zk中的broker信息进行比较，找出新增、删除、重启的broker
     val newBrokerIds = curBrokerIds.diff(liveOrShuttingDownBrokerIds)
     val deadBrokerIds = liveOrShuttingDownBrokerIds.diff(curBrokerIds)
+    // &取交集
+    // 如果当前broker的epoch大于controller中缓存的broker的epoch，说明该broker重启了
     val bouncedBrokerIds = (curBrokerIds & liveOrShuttingDownBrokerIds)
       .filter(brokerId => curBrokerIdAndEpochs(brokerId) > controllerContext.liveBrokerIdAndEpochs(brokerId))
+
     val newBrokerAndEpochs = curBrokerAndEpochs.filter { case (broker, _) => newBrokerIds.contains(broker.id) }
     val bouncedBrokerAndEpochs = curBrokerAndEpochs.filter { case (broker, _) => bouncedBrokerIds.contains(broker.id) }
+
     val newBrokerIdsSorted = newBrokerIds.toSeq.sorted
     val deadBrokerIdsSorted = deadBrokerIds.toSeq.sorted
     val liveBrokerIdsSorted = curBrokerIds.toSeq.sorted
@@ -1588,6 +1605,7 @@ class KafkaController(val config: KafkaConfig,
     bouncedBrokerAndEpochs.keySet.foreach(controllerChannelManager.addBroker)
     deadBrokerIds.foreach(controllerChannelManager.removeBroker)
 
+    // 新加的broker需要将其添加到controllerContext中
     if (newBrokerIds.nonEmpty) {
       val (newCompatibleBrokerAndEpochs, newIncompatibleBrokerAndEpochs) =
         partitionOnFeatureCompatibility(newBrokerAndEpochs)
@@ -1598,8 +1616,10 @@ class KafkaController(val config: KafkaConfig,
       controllerContext.addLiveBrokers(newCompatibleBrokerAndEpochs)
       onBrokerStartup(newBrokerIdsSorted)
     }
+    // 如果有broker重启，需要将重启的broker从controllerContext中移除，然后重新添加
     if (bouncedBrokerIds.nonEmpty) {
       controllerContext.removeLiveBrokers(bouncedBrokerIds)
+      // 关闭 broker
       onBrokerFailure(bouncedBrokerIdsSorted)
       val (bouncedCompatibleBrokerAndEpochs, bouncedIncompatibleBrokerAndEpochs) =
         partitionOnFeatureCompatibility(bouncedBrokerAndEpochs)
@@ -1608,8 +1628,10 @@ class KafkaController(val config: KafkaConfig,
           bouncedIncompatibleBrokerAndEpochs.map { case (broker, _) => broker.id }.toSeq.sorted.mkString(","))
       }
       controllerContext.addLiveBrokers(bouncedCompatibleBrokerAndEpochs)
+      // 重新添加 broker
       onBrokerStartup(bouncedBrokerIdsSorted)
     }
+    // 从controllerContext中移除已经死亡的broker
     if (deadBrokerIds.nonEmpty) {
       controllerContext.removeLiveBrokers(deadBrokerIds)
       onBrokerFailure(deadBrokerIdsSorted)
@@ -2419,6 +2441,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
 
+  // controller 从队列中获取到要处理的 Event 事件，开始处理
   override def process(event: ControllerEvent): Unit = {
     try {
       event match {
@@ -2443,6 +2466,7 @@ class KafkaController(val config: KafkaConfig,
           processUpdateMetadataResponseReceived(response, brokerId)
         case TopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors) =>
           processTopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors)
+       // 有 broker 上下线的 event 事件
         case BrokerChange =>
           processBrokerChange()
         case BrokerModifications(brokerId) =>
@@ -2497,6 +2521,7 @@ class KafkaController(val config: KafkaConfig,
 }
 
 class BrokerChangeHandler(eventManager: ControllerEventManager) extends ZNodeChildChangeHandler {
+  // 路径地址：/brokers/ids
   override val path: String = BrokerIdsZNode.path
 
   override def handleChildChange(): Unit = {

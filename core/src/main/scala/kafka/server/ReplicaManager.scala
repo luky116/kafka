@@ -1359,9 +1359,11 @@ class ReplicaManager(val config: KafkaConfig,
           stateChangeLogger.warn(s"Ignoring LeaderAndIsr request from controller $controllerId with " +
             s"correlation id $correlationId since its controller epoch ${leaderAndIsrRequest.controllerEpoch} is old. " +
             s"Latest known controller epoch is $controllerEpoch")
+          // Controller已换届，忽略leaderAndIsr请求，即请求过期
           leaderAndIsrRequest.getErrorResponse(0, Errors.STALE_CONTROLLER_EPOCH.exception)
         } else {
           val responseMap = new mutable.HashMap[TopicPartition, Errors]
+          // 更新当前的 epoch
           controllerEpoch = leaderAndIsrRequest.controllerEpoch
 
           val partitionStates = new mutable.HashMap[Partition, LeaderAndIsrPartitionState]()
@@ -1369,7 +1371,10 @@ class ReplicaManager(val config: KafkaConfig,
           // First create the partition if it doesn't exist already
           requestPartitionStates.foreach { partitionState =>
             val topicPartition = new TopicPartition(partitionState.topicName, partitionState.partitionIndex)
+            // getPartition 从当前 broker 的缓存中去获取 partition 信息
             val partitionOpt = getPartition(topicPartition) match {
+              // 已离线
+              // todo 为啥要报错呢？？？？
               case HostedPartition.Offline =>
                 stateChangeLogger.warn(s"Ignoring LeaderAndIsr request from " +
                   s"controller $controllerId with correlation id $correlationId " +
@@ -1378,6 +1383,7 @@ class ReplicaManager(val config: KafkaConfig,
                 responseMap.put(topicPartition, Errors.KAFKA_STORAGE_ERROR)
                 None
 
+                // raft 专用，请忽略
               case _: HostedPartition.Deferred =>
                 throw new IllegalStateException("We should never be deferring partition metadata changes and becoming a leader or follower when using ZooKeeper")
 
@@ -1385,6 +1391,7 @@ class ReplicaManager(val config: KafkaConfig,
                 Some(partition)
 
               case HostedPartition.None =>
+                // 不存在，则创建 partition
                 val partition = Partition(topicPartition, time, configRepository, this)
                 allPartitions.putIfNotExists(topicPartition, HostedPartition.Online(partition))
                 Some(partition)
@@ -1394,16 +1401,20 @@ class ReplicaManager(val config: KafkaConfig,
             partitionOpt.foreach { partition =>
               val currentLeaderEpoch = partition.getLeaderEpoch
               val requestLeaderEpoch = partitionState.leaderEpoch
+              // todo 确认 controller 的 requestTopicId 是哪里来的？？？
               val requestTopicId = topicIds.get(topicPartition.topic)
 
               if (!partition.checkOrSetTopicId(requestTopicId)) {
+                // 如果返回失败，说明这个 topic 的 id 对不上，是系统问题，直接返回错误
                 responseMap.put(topicPartition, Errors.INCONSISTENT_TOPIC_ID)
               } else if (requestLeaderEpoch > currentLeaderEpoch) {
                 // If the leader epoch is valid record the epoch of the controller that made the leadership decision.
                 // This is useful while updating the isr to maintain the decision maker controller's epoch in the zookeeper path
+                // 当前 broker 是 topic 的一个副本
                 if (partitionState.replicas.contains(localBrokerId))
                   partitionStates.put(partition, partitionState)
                 else {
+                  // 说明当前 broker 不影响收到这个 LeaderAndIsr 请求，直接返回错误
                   stateChangeLogger.warn(s"Ignoring LeaderAndIsr request from controller $controllerId with " +
                     s"correlation id $correlationId epoch $controllerEpoch for partition $topicPartition as itself is not " +
                     s"in assigned replica list ${partitionState.replicas.asScala.mkString(",")}")
@@ -1426,9 +1437,11 @@ class ReplicaManager(val config: KafkaConfig,
             }
           }
 
+          // 当前 broker 成为 leader 的 partition
           val partitionsToBeLeader = partitionStates.filter { case (_, partitionState) =>
             partitionState.leader == localBrokerId
           }
+          // 当前 broker 成为 follower 的 partition
           val partitionsToBeFollower = partitionStates.filter { case (k, _) => !partitionsToBeLeader.contains(k) }
 
           val highWatermarkCheckpoints = new LazyOffsetCheckpoints(this.highWatermarkCheckpoints)

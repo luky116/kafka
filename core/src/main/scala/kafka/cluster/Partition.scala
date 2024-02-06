@@ -435,6 +435,7 @@ class Partition(val topicPartition: TopicPartition,
    * @param requestTopicId the topic ID from the request
    * @return true if the request topic id is consistent, false otherwise
    */
+    // 如果 broker 没有存 topic_id,则将请求传来的 id 赋值给他
   def checkOrSetTopicId(requestTopicId: Uuid): Boolean = {
     // If the request had an invalid topic ID, then we assume that topic IDs are not supported.
     // The topic ID was not inconsistent, so return true.

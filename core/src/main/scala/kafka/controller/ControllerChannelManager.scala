@@ -48,6 +48,7 @@ object ControllerChannelManager {
   val RequestRateAndQueueTimeMetricName = "RequestRateAndQueueTimeMs"
 }
 
+// 异步内存队列来处理请求的发送，它只用于Controller节点和其它broker通信
 class ControllerChannelManager(controllerContext: ControllerContext,
                                config: KafkaConfig,
                                time: Time,
@@ -58,6 +59,7 @@ class ControllerChannelManager(controllerContext: ControllerContext,
 
   // key 是 broker ID，value 是 ControllerBrokerStateInfo 对象，用于记录与对应 broker 的连接信息
   // ControllerBrokerStateInfo 是一个 POJO 类，里面记录了 broker 的基础信息、请求阻塞队列以及 RequestSendThread 信息
+  // 注意，每一个 broker 都会单独和 controller 建立一个连接
   protected val brokerStateInfo = new HashMap[Int, ControllerBrokerStateInfo]
   private val brokerLock = new Object
   this.logIdent = "[Channel manager on controller " + config.brokerId + "]: "
@@ -87,6 +89,7 @@ class ControllerChannelManager(controllerContext: ControllerContext,
     }
   }
 
+  // controller 给 broker 发送消息时，只是将请求放在了 brokerStateInfo 中的 messageQueue 中，由异步线程批量发送
   def sendRequest(brokerId: Int, request: AbstractControlRequest.Builder[_ <: AbstractControlRequest],
                   callback: AbstractResponse => Unit = null): Unit = {
     brokerLock synchronized {
@@ -95,6 +98,8 @@ class ControllerChannelManager(controllerContext: ControllerContext,
         case Some(stateInfo) =>
           stateInfo.messageQueue.put(QueueItem(request.apiKey, request, callback, time.milliseconds()))
         case None =>
+          // 如果一个 broker 离线，则不会有队列
+          // 说明，如果 controller 的 brokerStateInfo 不存在某个 broker 的信息，会认为该 broker 离线
           warn(s"Not sending request $request to broker $brokerId, since it is offline.")
       }
     }
@@ -124,10 +129,10 @@ class ControllerChannelManager(controllerContext: ControllerContext,
     // 为该Broker构造请求阻塞队列
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug(s"Controller ${config.brokerId} trying to connect to broker ${broker.id}")
-    // contro-plane 的通信协议
+    // contro-plane 的通信协议，如果没有配置，则默认使用 inter-broker 协议
     val controllerToBrokerListenerName = config.controlPlaneListenerName.getOrElse(config.interBrokerListenerName)
     val controllerToBrokerSecurityProtocol = config.controlPlaneSecurityProtocol.getOrElse(config.interBrokerSecurityProtocol)
-    // 获取待连接Broker节点对象信息
+    // 获取待连接Broker节点的连接信息。注意，这个信息，是从 zk 获取的
     val brokerNode = broker.node(controllerToBrokerListenerName)
     val logContext = new LogContext(s"[Controller id=${config.brokerId}, targetBrokerId=${brokerNode.idString}] ")
     val (networkClient, reconfigurableChannelBuilder) = {
@@ -202,6 +207,7 @@ class ControllerChannelManager(controllerContext: ControllerContext,
 
     // 创建该Broker专属的ControllerBrokerStateInfo实例
     // 并将其加入到brokerStateInfo统一管理
+    // 支持，controller 才会认为这个 broker 没有离线
     brokerStateInfo.put(broker.id, ControllerBrokerStateInfo(networkClient, brokerNode, messageQueue,
       requestThread, queueSizeGauge, requestRateAndQueueTimeMetrics, reconfigurableChannelBuilder))
   }
@@ -425,6 +431,8 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
         .setIsNew(isNew || alreadyNew))
     }
 
+    // 同时更新 meta 信息。
+    // 因为，如果是新的 leader，那么就需要更新 meta 信息
     addUpdateMetadataRequestForBrokers(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set(topicPartition))
   }
 
@@ -487,6 +495,7 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
   }
 
   private def sendLeaderAndIsrRequest(controllerEpoch: Int, stateChangeLog: StateChangeLogger): Unit = {
+    // todo 协议版本相关，待补充
     val leaderAndIsrRequestVersion: Short =
       if (config.interBrokerProtocolVersion >= KAFKA_2_8_IV1) 5
       else if (config.interBrokerProtocolVersion >= KAFKA_2_4_IV1) 4
@@ -495,12 +504,14 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
       else if (config.interBrokerProtocolVersion >= KAFKA_1_0_IV0) 1
       else 0
 
+    // 从缓存中取出待发送的请求
     leaderAndIsrRequestMap.forKeyValue { (broker, leaderAndIsrPartitionStates) =>
       if (controllerContext.liveOrShuttingDownBrokerIds.contains(broker)) {
         val leaderIds = mutable.Set.empty[Int]
         var numBecomeLeaders = 0
         leaderAndIsrPartitionStates.forKeyValue { (topicPartition, state) =>
           leaderIds += state.leader
+          // 成为 leader 的节点
           val typeOfRequest = if (broker == state.leader) {
             numBecomeLeaders += 1
             "become-leader"

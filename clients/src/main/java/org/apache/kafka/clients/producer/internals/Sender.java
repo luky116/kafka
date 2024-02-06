@@ -781,9 +781,12 @@ public class Sender implements Runnable {
                 tpData = new ProduceRequestData.TopicProduceData().setName(tp.topic());
                 tpd.add(tpData);
             }
+            // tpData 这里存放了所有的 batch 消息
             tpData.partitionData().add(new ProduceRequestData.PartitionProduceData()
                     .setIndex(tp.partition())
                     .setRecords(records));
+            // todo 一个 partition 可能有多个 batch 吧？这里只记录最后一个 batch 吗？？？
+            // 这里的意思是，一个 partition 只有一个 batch 会到达这里
             recordsByPartition.put(tp, batch);
         }
 

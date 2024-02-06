@@ -267,6 +267,7 @@ class KafkaApis(val requestChannel: RequestChannel, // 请求通道
         s"${leaderAndIsrRequest.brokerEpoch} smaller than the current broker epoch ${zkSupport.controller.brokerEpoch}")
       requestHelper.sendResponseExemptThrottle(request, leaderAndIsrRequest.getErrorResponse(0, Errors.STALE_BROKER_EPOCH.exception))
     } else {
+      // becomeLeaderOrFollower 核心逻辑
       val response = replicaManager.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest,
         RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))
       requestHelper.sendResponseExemptThrottle(request, response)

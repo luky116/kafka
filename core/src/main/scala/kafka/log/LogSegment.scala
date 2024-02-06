@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,10 +16,6 @@
  */
 package kafka.log
 
-import java.io.{File, IOException}
-import java.nio.file.{Files, NoSuchFileException}
-import java.nio.file.attribute.FileTime
-import java.util.concurrent.TimeUnit
 import kafka.common.LogSegmentOffsetOverflowException
 import kafka.metrics.{KafkaMetricsGroup, KafkaTimer}
 import kafka.server.epoch.LeaderEpochFileCache
@@ -31,6 +27,10 @@ import org.apache.kafka.common.record.FileRecords.{LogOffsetPosition, TimestampA
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.{BufferSupplier, Time}
 
+import java.io.{File, IOException}
+import java.nio.file.attribute.FileTime
+import java.nio.file.{Files, NoSuchFileException}
+import java.util.concurrent.TimeUnit
 import scala.jdk.CollectionConverters._
 import scala.math._
 
@@ -42,24 +42,27 @@ import scala.math._
  *
  * A segment with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
  *
- * @param log The file records containing log entries
- * @param lazyOffsetIndex The offset index
- * @param lazyTimeIndex The timestamp index
- * @param txnIndex The transaction index
- * @param baseOffset A lower bound on the offsets in this segment
+ * @param log                The file records containing log entries
+ * @param lazyOffsetIndex    The offset index
+ * @param lazyTimeIndex      The timestamp index
+ * @param txnIndex           The transaction index
+ * @param baseOffset         A lower bound on the offsets in this segment
  * @param indexIntervalBytes The approximate number of bytes between entries in the index
- * @param rollJitterMs The maximum random jitter subtracted from the scheduled segment roll time
- * @param time The time instance
+ * @param rollJitterMs       The maximum random jitter subtracted from the scheduled segment roll time
+ * @param time               The time instance
  */
 @nonthreadsafe
-class LogSegment private[log] (val log: FileRecords,
-                               val lazyOffsetIndex: LazyIndex[OffsetIndex],
-                               val lazyTimeIndex: LazyIndex[TimeIndex],
-                               val txnIndex: TransactionIndex,
-                               val baseOffset: Long,
-                               val indexIntervalBytes: Int,
-                               val rollJitterMs: Long,
-                               val time: Time) extends Logging {
+class LogSegment private[log](val log: FileRecords, // 消息日志文件
+                              val lazyOffsetIndex: LazyIndex[OffsetIndex], //位移索引文件
+                              val lazyTimeIndex: LazyIndex[TimeIndex], // 时间索引文件
+                              val txnIndex: TransactionIndex, // 已中止的事务索引文件
+                              val baseOffset: Long, // 文件名，即每个文件的最小索引值
+                              // Broker 端参数 log.index.interval.bytes 值，它控制了日志段对象新增索引项的频率。
+                              val indexIntervalBytes: Int,
+                              // log.roll.jitter.ms，它控制了日志段生成的倒计时"扰动值"
+                              val rollJitterMs: Long,
+                              // 用于统计计时
+                              val time: Time) extends Logging {
 
   def offsetIndex: OffsetIndex = lazyOffsetIndex.get
 
@@ -93,6 +96,7 @@ class LogSegment private[log] (val log: FileRecords,
   private var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
+  // 距离上次写入索引后，新加的消息字节数
   private var bytesSinceLastIndexEntry = 0
 
   // The timestamp we used for time based log rolling and for ensuring max compaction delay
@@ -101,7 +105,10 @@ class LogSegment private[log] (val log: FileRecords,
 
   /* The maximum timestamp we see so far */
   @volatile private var _maxTimestampSoFar: Option[Long] = None
+
   def maxTimestampSoFar_=(timestamp: Long): Unit = _maxTimestampSoFar = Some(timestamp)
+
+  // 日志段的最大时间戳
   def maxTimestampSoFar: Long = {
     if (_maxTimestampSoFar.isEmpty)
       _maxTimestampSoFar = Some(timeIndex.lastEntry.timestamp)
@@ -109,7 +116,10 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   @volatile private var _offsetOfMaxTimestampSoFar: Option[Long] = None
+
+  // 最大时间戳所属消息的位移值
   def offsetOfMaxTimestampSoFar_=(offset: Long): Unit = _offsetOfMaxTimestampSoFar = Some(offset)
+
   def offsetOfMaxTimestampSoFar: Long = {
     if (_offsetOfMaxTimestampSoFar.isEmpty)
       _offsetOfMaxTimestampSoFar = Some(timeIndex.lastEntry.offset)
@@ -129,41 +139,54 @@ class LogSegment private[log] (val log: FileRecords,
   /**
    * Append the given messages starting with the given offset. Add
    * an entry to the index if needed.
-   *
+   * todo 调用这个方法前，需要加锁？？？
    * It is assumed this method is being called from within a lock.
    *
-   * @param largestOffset The last offset in the message set
-   * @param largestTimestamp The largest timestamp in the message set.
+   * @param largestOffset               The last offset in the message set
+   * @param largestTimestamp            The largest timestamp in the message set.
    * @param shallowOffsetOfMaxTimestamp The offset of the message that has the largest timestamp in the messages to append.
-   * @param records The log entries to append.
+   * @param records                     The log entries to append.
    * @return the physical position in the file of the appended records
    * @throws LogSegmentOffsetOverflowException if the largest offset causes index offset overflow
    */
   @nonthreadsafe
-  def append(largestOffset: Long,
-             largestTimestamp: Long,
-             shallowOffsetOfMaxTimestamp: Long,
-             records: MemoryRecords): Unit = {
+  def append(largestOffset: Long, // 最大位移
+             largestTimestamp: Long,  // 最大时间戳
+             shallowOffsetOfMaxTimestamp: Long, // 最大时间戳对应消息的位移
+             records: MemoryRecords): Unit = {  // 正在要写入的消息集合 todo 确认下，是否是批消息？
+    // 判断消息是否为空，为空不执行任何操作
     if (records.sizeInBytes > 0) {
       trace(s"Inserting ${records.sizeInBytes} bytes at end offset $largestOffset at position ${log.sizeInBytes} " +
-            s"with largest timestamp $largestTimestamp at shallow offset $shallowOffsetOfMaxTimestamp")
+        s"with largest timestamp $largestTimestamp at shallow offset $shallowOffsetOfMaxTimestamp")
+      // 这个日志段当前的消息大小
       val physicalPosition = log.sizeInBytes()
       if (physicalPosition == 0)
         rollingBasedTimestamp = Some(largestTimestamp)
 
+      // 确保，日志段当前的 largestOffset-baseOffset 是否在 [0,Int.MaxValue]之间，否则直接报错
+      // 也就是说，一个日志段最多只能存储 Int.MaxValue 个消息，如果超过，就需要新起一个日志段
       ensureOffsetInRange(largestOffset)
 
       // append the messages
+      // 真正的写入文件，将消息对象写入到操作系统的页缓存中
       val appendedBytes = log.append(records)
       trace(s"Appended $appendedBytes to ${log.file} at end offset $largestOffset")
       // Update the in memory max timestamp and corresponding offset.
       if (largestTimestamp > maxTimestampSoFar) {
+        // 更新日志段的最大时间戳以及最大时间戳所属消息的位移值属性
+        // 每个日志段都要保存当前最大时间戳信息和所属消息的位移信息。
+        // 注意：kafka 定期删除最近7天的日志，用的就是这个时间索引
         maxTimestampSoFar = largestTimestamp
         offsetOfMaxTimestampSoFar = shallowOffsetOfMaxTimestamp
       }
       // append an entry to the index (if needed)
+      // 更新索引项，和写入的字节数统计
+      // 如果距离上次添加索引，超过了一定的字节数，就添加新的索引
       if (bytesSinceLastIndexEntry > indexIntervalBytes) {
+        // 索引 = 当前最大位移值 + 物理偏移量
         offsetIndex.append(largestOffset, physicalPosition)
+        // 只要时间大于当前时间索引的最大时间戳，并且位移大于当前索引的最大位移，就能添加成功
+        // 可以理解为，正常情况下，都能成功
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar)
         bytesSinceLastIndexEntry = 0
       }
@@ -262,11 +285,11 @@ class LogSegment private[log] (val log: FileRecords,
    * The startingFilePosition argument is an optimization that can be used if we already know a valid starting position
    * in the file higher than the greatest-lower-bound from the index.
    *
-   * @param offset The offset we want to translate
+   * @param offset               The offset we want to translate
    * @param startingFilePosition A lower bound on the file position from which to begin the search. This is purely an optimization and
-   * when omitted, the search will begin at the position in the offset index.
+   *                             when omitted, the search will begin at the position in the offset index.
    * @return The position in the log storing the message with the least offset >= the requested offset and the size of the
-    *        message or null if no message meets this criteria.
+   *         message or null if no message meets this criteria.
    */
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): LogOffsetPosition = {
@@ -278,19 +301,18 @@ class LogSegment private[log] (val log: FileRecords,
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read
-   * @param maxSize The maximum number of bytes to include in the message set we read
-   * @param maxPosition The maximum position in the log segment that should be exposed for read
+   * @param startOffset   A lower bound on the first offset to include in the message set we read
+   * @param maxSize       The maximum number of bytes to include in the message set we read
+   * @param maxPosition   The maximum position in the log segment that should be exposed for read
    * @param minOneMessage If this is true, the first message will be returned even if it exceeds `maxSize` (if one exists)
-   *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
    */
   @threadsafe
-  def read(startOffset: Long,
-           maxSize: Int,
-           maxPosition: Long = size,
-           minOneMessage: Boolean = false): FetchDataInfo = {
+  def read(startOffset: Long, // 要读取的第一条消息的位移；
+           maxSize: Int, // 能读取的最大字节数；
+           maxPosition: Long = size, // 能读到的最大文件位置；
+           minOneMessage: Boolean = false): FetchDataInfo = { // 是否允许在消息体过大时至少返回第一条消息。
     if (maxSize < 0)
       throw new IllegalArgumentException(s"Invalid max size $maxSize for log read from segment $log")
 
@@ -318,16 +340,19 @@ class LogSegment private[log] (val log: FileRecords,
       firstEntryIncomplete = adjustedMaxSize < startOffsetAndSize.size)
   }
 
-   def fetchUpperBoundOffset(startOffsetPosition: OffsetPosition, fetchSize: Int): Option[Long] =
-     offsetIndex.fetchUpperBoundOffset(startOffsetPosition, fetchSize).map(_.offset)
+  def fetchUpperBoundOffset(startOffsetPosition: OffsetPosition, fetchSize: Int): Option[Long] =
+    offsetIndex.fetchUpperBoundOffset(startOffsetPosition, fetchSize).map(_.offset)
 
   /**
-   * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes
+   *
+   * 恢复日志段
+   * Run recovery on the given segment.
+   * This will rebuild the index from the log file and lop off any invalid bytes
    * from the end of the log and index.
    *
    * @param producerStateManager Producer state corresponding to the segment's base offset. This is needed to recover
    *                             the transaction index.
-   * @param leaderEpochCache Optionally a cache for updating the leader epoch during recovery.
+   * @param leaderEpochCache     Optionally a cache for updating the leader epoch during recovery.
    * @return The number of bytes truncated from the log
    * @throws LogSegmentOffsetOverflowException if the log segment contains an offset that causes the index offset to overflow
    */
@@ -367,7 +392,7 @@ class LogSegment private[log] (val log: FileRecords,
         }
       }
     } catch {
-      case e@ (_: CorruptRecordException | _: InvalidRecordException) =>
+      case e@(_: CorruptRecordException | _: InvalidRecordException) =>
         warn("Found invalid messages in log segment %s at byte offset %d: %s. %s"
           .format(log.file.getAbsolutePath, validBytes, e.getMessage, e.getCause))
     }
@@ -510,9 +535,9 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
-    * If not previously loaded,
-    * load the timestamp of the first message into memory.
-    */
+   * If not previously loaded,
+   * load the timestamp of the first message into memory.
+   */
   private def loadFirstBatchTimestamp(): Unit = {
     if (rollingBasedTimestamp.isEmpty) {
       val iter = log.batches.iterator()
@@ -530,7 +555,7 @@ class LogSegment private[log] (val log: FileRecords,
    * segment is rolled if the difference between the current wall clock time and the segment create time exceeds the
    * segment rolling time.
    */
-  def timeWaitedForRoll(now: Long, messageTimestamp: Long) : Long = {
+  def timeWaitedForRoll(now: Long, messageTimestamp: Long): Long = {
     // Load the timestamp of the first message into memory
     loadFirstBatchTimestamp()
     rollingBasedTimestamp match {
@@ -540,9 +565,9 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
-    * @return the first batch timestamp if the timestamp is available. Otherwise return Long.MaxValue
-    */
-  def getFirstBatchTimestamp() : Long = {
+   * @return the first batch timestamp if the timestamp is available. Otherwise return Long.MaxValue
+   */
+  def getFirstBatchTimestamp(): Long = {
     loadFirstBatchTimestamp()
     rollingBasedTimestamp match {
       case Some(t) if t >= 0 => t
@@ -558,16 +583,16 @@ class LogSegment private[log] (val log: FileRecords,
    * - If all the messages in the segment have smaller offsets, return None
    * - If all the messages in the segment have smaller timestamps, return None
    * - If all the messages in the segment have larger timestamps, or no message in the segment has a timestamp
-   *   the returned the offset will be max(the base offset of the segment, startingOffset) and the timestamp will be Message.NoTimestamp.
+   * the returned the offset will be max(the base offset of the segment, startingOffset) and the timestamp will be Message.NoTimestamp.
    * - Otherwise, return an option of TimestampOffset. The offset is the offset of the first message whose timestamp
-   *   is greater than or equals to the target timestamp and whose offset is greater than or equals to the startingOffset.
+   * is greater than or equals to the target timestamp and whose offset is greater than or equals to the startingOffset.
    *
    * This methods only returns None when 1) all messages' offset < startOffing or 2) the log is not empty but we did not
    * see any message when scanning the log from the indexed position. The latter could happen if the log is truncated
    * after we get the indexed position but before we scan the log from there. In this case we simply return None and the
    * caller will need to check on the truncated log and maybe retry or even do the search on another log segment.
    *
-   * @param timestamp The timestamp to search for.
+   * @param timestamp      The timestamp to search for.
    * @param startingOffset The starting offset to search.
    * @return the timestamp and offset of the first message that meets the requirements. None will be returned if there is no such message.
    */
@@ -594,8 +619,8 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
-    * Close file handlers used by the log segment but don't write to disk. This is used when the disk may have failed
-    */
+   * Close file handlers used by the log segment but don't write to disk. This is used when the disk may have failed
+   */
   def closeHandlers(): Unit = {
     CoreUtils.swallow(lazyOffsetIndex.closeHandler(), this)
     CoreUtils.swallow(lazyTimeIndex.closeHandler(), this)

@@ -35,6 +35,7 @@ import scala.jdk.CollectionConverters._
 
 object RequestHandlerHelper {
 
+  // 如果 leader 发生变更，触发加载 __consumer_offsets 的逻辑
   def onLeadershipChange(groupCoordinator: GroupCoordinator,
                          txnCoordinator: TransactionCoordinator,
                          updatedLeaders: Iterable[Partition],
